@@ -1,34 +1,88 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* App shell styles - dark tactical theme */
+.App {
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+.font-display {
+  font-family: "Barlow Condensed", sans-serif;
+  letter-spacing: -0.01em;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+.font-mono-poker {
+  font-family: "JetBrains Mono", monospace;
 }
 
-.App-link {
-    color: #61dafb;
+/* Poker table surface */
+.poker-table-surface {
+  background: radial-gradient(ellipse at center, #1E293B 0%, #0F1115 100%);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 0 60px rgba(59, 130, 246, 0.06);
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+.chip-stack-shadow {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.8), inset 0 2px 4px rgba(255, 255, 255, 0.2);
 }
+
+.glow-correct {
+  box-shadow: 0 0 32px rgba(16, 185, 129, 0.55), 0 0 8px rgba(16, 185, 129, 0.35);
+}
+
+.glow-incorrect {
+  box-shadow: 0 0 32px rgba(239, 68, 68, 0.55), 0 0 8px rgba(239, 68, 68, 0.35);
+}
+
+.glass-panel {
+  background: rgba(10, 12, 16, 0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Playing card */
+.playing-card {
+  background: #FAFAFA;
+  color: #0F1115;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(15, 17, 21, 0.15);
+}
+
+.playing-card-back {
+  background: linear-gradient(135deg, #1E293B 0%, #0F1115 100%);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.7);
+}
+
+.playing-card-back::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 4px;
+  background:
+    repeating-linear-gradient(45deg, rgba(59, 130, 246, 0.12) 0 4px, transparent 4px 8px);
+}
+
+/* Focus ring */
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #050505, 0 0 0 4px #F8FAFC;
+}
+
+/* Subtle noise overlay class for large surfaces */
+.noise-overlay {
+  position: relative;
+}
+.noise-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #0F1115; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }

@@ -1,0 +1,27 @@
+{
+  "summary": "First-finish latency test on Preflop Poker Trainer MVP. All 10 backend endpoints and all 6 frontend flows verified end-to-end. Backend: root, stats, bulk (4 scenarios across all 4 phases with correct derivation), list w/ phase filter, random (with & without phase, and 404 when empty), single POST, GET by id, DELETE by id (with 404 verification), DELETE all — all pass; ranges structure preserved exactly (AA {3bet:0.93, all_in:0.07}). Frontend: home loads with Ranges Loaded, admin shows 4 scenarios uploaded via curl, /train renders hero cards + HUD (PLAYERS 500/500) + all 5 action buttons, clicking action shows feedback overlay with GTO breakdown, Next Hand advances tournament (500→497), /stats shows totalHands=1 with all 3 charts, /review renders list, admin delete works via confirm dialog (4→3, toast 'Deleted').",
+  "tested_scope": ["backend", "frontend", "integration"],
+  "passed": [
+    "GET /api/ status=ok",
+    "GET /api/scenarios/stats returns total + by_phase (early/mid/bubble/final_table)",
+    "POST /api/scenarios/bulk inserts 4 scenarios with derived phases (100→early, 50→mid, 20→bubble, 12→final_table)",
+    "GET /api/scenarios with phase filter returns correct subset and preserves ranges structure exactly",
+    "GET /api/scenarios/random with and without phase param",
+    "GET /api/scenarios/random returns 404 on empty DB",
+    "POST /api/scenarios single insert with derived phase",
+    "DELETE /api/scenarios/{id} + GET returns 404 after delete",
+    "DELETE /api/scenarios clears all",
+    "Home page: title 'MASTER THE PREFLOP EDGE' rendered, start-tournament-btn visible, Ranges Loaded count present",
+    "Admin page shows total=4 and scenarios list with 4 items",
+    "Train page: hero cards, HUD (PLAYERS 500/500), all 5 action buttons visible",
+    "Action click shows feedback overlay with breakdown; Next Hand advances players (500→497)",
+    "Stats page: overall-accuracy, streak, total-hands, byPosition/byPhase/byAction charts all render",
+    "Review page renders with list",
+    "Admin delete via UI (confirm dialog): total 4→3, toast 'Deleted' shown, MongoDB updated"
+  ],
+  "failed": [],
+  "action_items": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true
+}
