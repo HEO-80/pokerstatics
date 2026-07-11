@@ -1,0 +1,170 @@
+{
+  "theme": "dark",
+  "archetype": "The Performance Pro (Elite Athleticism & Precision)",
+  "typography": {
+    "headings": {
+      "family": "Barlow Condensed, sans-serif",
+      "weights": ["600", "800"],
+      "instructions": "Use for large stats, action buttons, and phase indicators. High impact. Tracking tight."
+    },
+    "body": {
+      "family": "IBM Plex Sans, sans-serif",
+      "weights": ["400", "500"],
+      "instructions": "Use for readable data, hand history, labels. Clear, geometric legibility."
+    },
+    "mono": {
+      "family": "JetBrains Mono, monospace",
+      "weights": ["400", "700"],
+      "instructions": "Use for hand ranges, percentages, chip amounts, and exact statistics."
+    }
+  },
+  "colors": {
+    "backgrounds": {
+      "base": "#050505",
+      "surface": "#0F1115",
+      "surface_elevated": "#1A1D24",
+      "table_surface": "radial-gradient(ellipse at center, #1E293B 0%, #0F1115 100%)"
+    },
+    "text": {
+      "primary": "#F8FAFC",
+      "secondary": "#94A3B8",
+      "muted": "#475569"
+    },
+    "borders": {
+      "subtle": "rgba(255, 255, 255, 0.08)",
+      "strong": "rgba(255, 255, 255, 0.16)"
+    },
+    "actions": {
+      "fold": {
+        "bg": "transparent",
+        "border": "#EF4444",
+        "text": "#EF4444",
+        "hover_bg": "rgba(239, 68, 68, 0.1)"
+      },
+      "call": {
+        "bg": "#3B82F6",
+        "text": "#FFFFFF",
+        "hover_bg": "#2563EB"
+      },
+      "raise": {
+        "bg": "#10B981",
+        "text": "#FFFFFF",
+        "hover_bg": "#059669"
+      },
+      "marginal": {
+        "bg": "#F59E0B",
+        "text": "#FFFFFF",
+        "hover_bg": "#D97706"
+      },
+      "all_in": {
+        "bg": "#8B5CF6",
+        "text": "#FFFFFF",
+        "hover_bg": "#7C3AED"
+      }
+    },
+    "feedback": {
+      "correct": "#10B981",
+      "incorrect": "#EF4444"
+    }
+  },
+  "visual_enhancers": {
+    "surface_styles": {
+      "glassmorphism": "Use backdrop-blur-xl bg-black/60 with 1px border-white/10 for modals, immediate feedback overlays, and sticky HUDs.",
+      "neumorphism": "Not recommended for this archetype. Stick to sharp, flat, high-contrast panels.",
+      "grid_borders": "Use border-collapse with border-r border-b border-border/40 for the Stats Dashboard and hand history lists."
+    },
+    "shadows": {
+      "ambient": "0 8px 32px rgba(0, 0, 0, 0.5)",
+      "glow_correct": "0 0 20px rgba(16, 185, 129, 0.4)",
+      "glow_incorrect": "0 0 20px rgba(239, 68, 68, 0.4)",
+      "chip_stack": "0 4px 6px rgba(0, 0, 0, 0.8), inset 0 2px 4px rgba(255, 255, 255, 0.2)"
+    }
+  },
+  "layouts": {
+    "main_training_screen": {
+      "type": "Immersive Action Center",
+      "structure": "Top: Tournament HUD. Center: Poker Table Canvas. Bottom: Hero Cards & Massive Action Buttons.",
+      "instructions": "The table should take up 50-60vh on mobile, leaving ample room for thumb-reachable action buttons. Desktop can use a 2-column split (Table vs Dashboard/History)."
+    },
+    "stats_dashboard": {
+      "type": "High Density Grid (Mode B)",
+      "structure": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4. gap-6.",
+      "instructions": "Metrics like Overall Accuracy and Streaks should span larger columns. Use large typography for numbers. Use the 'Tracing Beam' surface strategy for key metric cards."
+    },
+    "poker_table": {
+      "type": "Tactical Oval",
+      "instructions": "Do not use a literal wood/green felt image. Use a CSS rounded-full (oval) container with a deep dark gradient and a glowing 1px inner border. Seats are absolute positioned items around the oval."
+    }
+  },
+  "components": {
+    "playing_card": {
+      "style": "Pure white background, sharp text, massive center suit icon. Red for hearts/diamonds (#EF4444), Black for spades/clubs (#0F1115).",
+      "layout": "w-16 h-24 or w-24 h-36 for Hero. Subtle shadow. Border radius sm."
+    },
+    "action_button": {
+      "style": "Massive touch targets. p-6 or p-8. Uppercase, tight tracking, font-bold.",
+      "layout": "Flex or Grid arrangement at the bottom of the screen."
+    },
+    "chip_stack": {
+      "style": "Tactical visualization. Minimal flat circular tokens with high-contrast mono font showing the BB amount. Use layered box-shadows to simulate stacks without heavy 3D.",
+      "layout": "Positioned near the player avatar/seat."
+    },
+    "feedback_overlay": {
+      "style": "Center-screen glassmorphism panel. Huge icon (Check/X). Breakdown of action frequencies (e.g. Call 80%, Fold 20%).",
+      "layout": "absolute inset-0 flex items-center justify-center z-50."
+    },
+    "hud_progress": {
+      "style": "Minimalist progress bar at top of screen.",
+      "layout": "Displays Blind Level, Remaining Players (500 -> 9), and Phase (Early/Mid/Bubble/Final Table)."
+    }
+  },
+  "motion": {
+    "cards": "Slide in from center/dealer and flip. Use Framer Motion layoutId for smooth hand transitions.",
+    "chips": "Slide from player seat to pot center.",
+    "feedback": "Scale-in pop with spring physics (stiffness: 300, damping: 20).",
+    "progress_bar": "Smooth width transition for tournament blind levels."
+  },
+  "accessibility": {
+    "contrast": "Ensure all text, especially card suits and chip numbers, pass APCA or WCAG 4.5:1 against their backgrounds.",
+    "focus": "All action buttons must have a high-contrast focus ring (e.g., ring-2 ring-offset-2 ring-offset-[#050505] ring-white).",
+    "reduced_motion": "Respect prefers-reduced-motion for card dealing animations."
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1542145177-4dc9b8029711?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzN8MHwxfHNlYXJjaHwxfHxkYXJrJTIwcG9rZXIlMjB0YWJsZSUyMGNoaXBzfGVufDB8fHx8MTc4MzYyMDQ0MHww&ixlib=rb-4.1.0&q=85",
+        "description": "Scattered dark poker chips. Use for subtle background textures or landing page hero if heavily darkened with a black/80 overlay.",
+        "category": "landing_background"
+      }
+    ]
+  },
+  "libraries": {
+    "icons": "lucide-react for UI actions.",
+    "charts": "recharts for the stats dashboard (e.g., accuracy over time line chart, position accuracy radar/bar chart).",
+    "motion": "framer-motion for card dealing, chips movement, and immediate feedback popups."
+  },
+  "instructions_to_main_agent": [
+    "You MUST use Barlow Condensed for major headings and numbers, and IBM Plex Sans for body text.",
+    "DO NOT use a literal casino green table. Use a deep tactical gradient oval with precise grid layouts for seats.",
+    "Action Buttons must be massive, occupying the bottom of the screen. Think 'Command Center', not 'Browser Game'.",
+    "Use data-testid on every interactive element (e.g., data-testid='action-btn-fold').",
+    "For cards, ensure they are high legibility playing cards. Red suits = #EF4444, Black suits = #0A0A0A (on white card backgrounds).",
+    "The feedback overlay must use glassmorphism with high contrast correctly colored text for the specific action breakdown.",
+    "Stats dashboard uses strict F-Pattern layout. Emphasize the North Star Metric (e.g., Overall Preflop Accuracy %).",
+    "Include an Admin view tailored for JSON range uploads and hand review list."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic outputs. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients (except for the table canvas).",
+    "Don't make generic centered layouts. Use F-Pattern or Bento grids.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "You MUST NOT apply universal transition. Eg: transition: all.",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file.",
+    "Always use modern button styles with interaction animations & color relevant to the app style.",
+    "Every interaction needs micro-animations.",
+    "Use 2-3x more spacing than feels comfortable.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Use sonner for toasts. Sonner component are located in /app/src/components/ui/sonner.tsx"
+  ]
+}
