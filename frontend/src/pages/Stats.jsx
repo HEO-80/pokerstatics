@@ -245,9 +245,9 @@ function ChartCard({ testId, title, data, colorByKey }) {
                 ]}
               />
               <Bar dataKey="accuracy" radius={[6, 6, 0, 0]}>
-                {data.map((entry, i) => (
+                {data.map((entry) => (
                   <Cell
-                    key={i}
+                    key={entry.key ?? entry.name}
                     fill={
                       colorByKey ? colorByKey(entry.key) : pctColor(entry.accuracy / 100)
                     }

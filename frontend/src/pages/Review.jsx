@@ -84,7 +84,7 @@ export default function Review() {
             <div className="max-h-[70vh] overflow-y-auto">
               {list.map((h, idx) => (
                 <button
-                  key={idx}
+                  key={`${h.timestamp}-${h.hand}-${idx}`}
                   onClick={() => setSelected(h)}
                   data-testid={`review-item-${idx}`}
                   className={`w-full text-left px-4 py-3 border-b border-white/6 hover:bg-white/4 transition-colors flex items-center justify-between ${
