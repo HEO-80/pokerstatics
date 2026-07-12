@@ -11,6 +11,7 @@ from typing import List, Dict, Optional, Union, Any
 import uuid
 from datetime import datetime, timezone
 
+from poker_analysis import analysis_router
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -219,6 +220,7 @@ async def delete_all_scenarios():
 # ----------------- App wiring -----------------
 
 app.include_router(api_router)
+app.include_router(analysis_router)
 
 app.add_middleware(
     CORSMiddleware,
