@@ -173,3 +173,56 @@ feat(backend): motor de mesa y IA de bots con tests
   rangos preflop ponderados + Chen, equity vs pot odds postflop)
 - tests: 3 tests de mesa + 4 de bots (incl. fuzz 200 manos), todos verdes
 
+¡Los 4 tests pasan, incluido el fuzz de 200 manos! Ese es el que da confianza de verdad: significa que los bots jugaron cientos de manos completas con distintos perfiles y números de jugadores, sin lanzar una sola acción ilegal y conservando las fichas. La lógica de decisión es sólida.
+
+Y presta atención a lo que reporta, porque es exactamente lo que queríamos que pasara: el fuzz cazó un bug real. Los tamaños de apuesta salían con decimales (pot × 0.66, etc.), y eso descuadraba el reparto de botes que asume fichas enteras — una mano acabó con 1612.48 en vez de 1611. Lo arregló redondeando los importes a entero, y sin tocar poker_table.py (que sigue intacto y verde). Ese es justo el valor de haber pedido el fuzz: un error que en producción habría sido un "de vez en cuando las fichas no cuadran y no sé por qué", cazado y resuelto antes de que llegue a la mesa. Sonnet 5 lo manejó muy bien.
+
+Un par de detalles buenos que hizo bien:
+
+Heurística de Chen + posición para cuando no hay rango cargado — es una fórmula estándar y reconocida para valorar manos preflop, buena elección
+Postflop compara equity real vs pot odds — usa el motor de verdad, no inventa
+Clamp final de legalidad — cualquier decisión pasa por un filtro que garantiza que sea legal, red de seguridad correcta
+
+Paso 2 hecho y verificado. Marca las casillas.
+
+Dónde estamos:
+
+✅ Paso 1 — Motor de una mano (side-pots) — 3 tests verdes
+✅ Paso 2 — IA de los bots (perfiles, rangos, equity) — 4 tests verdes
+⬜ Paso 3 — Endpoint de la mesa ← siguiente
+⬜ Paso 4 — Mesa visual
+⬜ Paso 5 — El coach
+⬜ Paso 6 — Puntos y niveles
+
+Ya tienes todo el cerebro del juego funcionando por debajo: repartir, apostar, side-pots, y rivales que deciden con criterio. Lo que falta ahora es sacarlo del backend puro y hacerlo jugable.
+
+El siguiente paso (3) es el endpoint de la mesa: conectar poker_table + poker_bot al server.py para que se pueda crear una mano, ver el estado, y que tú (y los bots) actuéis vía API. Aquí es donde por fin tocamos server.py — que hasta ahora habíamos dejado en paz a propósito. Es también donde entra una decisión de diseño que conviene pensar un momento: cómo se guarda el estado de una mano entre jugada y jugada (en memoria, o en Mongo).
+
+¡Los 3 tests pasan y los 10 en conjunto siguen verdes! La mesa ya es jugable por API — el test clave (jugar una partida entera con las cartas de los rivales ocultas hasta el final, conservando fichas) pasó. Eso es un hito grande: tienes el juego completo funcionando por debajo, solo que aún sin cara visible.
+
+Y fíjate en dos cosas que hizo bien Sonnet, porque demuestran que trabajó con criterio y no a ciegas:
+
+1. Tocó server.py con exactamente las 2 líneas que pedimos (import + include_router), nada más. Justo lo que queríamos.
+
+2. Te corrigió un error MÍO. En el prompt te dije que reutilizara poker_table.state(), pero ese método no existe — me lo inventé al redactar. En vez de crear un state() falso o duplicar lógica, construyó la vista del hero directamente en el router a partir de los atributos reales de la clase Hand. Eso es exactamente lo que quieres de un agente: que verifique contra el código real en vez de tragarse una instrucción incorrecta. Bien por él, y disculpa el desliz por mi parte.
+
+Sobre su pregunta (si quieres un Hand.state() reutilizable): sí, pero más adelante. Cuando lleguemos al coach y al frontend probablemente venga bien tener ese método centralizado. Por ahora déjalo como está — funciona, y no conviene tocar poker_table.py sin necesidad. Lo apuntamos para cuando haga falta.
+
+Paso 3 hecho y verificado.
+
+Dónde estamos:
+
+✅ Paso 1 — Motor de una mano (side-pots)
+✅ Paso 2 — IA de los bots
+✅ Paso 3 — Endpoint de la mesa (jugable por API, cartas ocultas) ← recién hecho
+⬜ Paso 4 — Mesa visual ← siguiente
+⬜ Paso 5 — El coach
+⬜ Paso 6 — Puntos y niveles
+
+Has terminado todo el backend del juego. Repartir, apostar, side-pots, bots con criterio, y una API para jugar manos completas. Todo probado, 10 tests en verde.
+
+El paso 4 es la mesa visual — y aquí cambia el tipo de trabajo: dejamos el backend (Python, lógico, testeable) y pasamos al frontend (React, visual). Es más "de diseño" y menos "de verificación con tests", así que el flujo será distinto: en vez de tests que pasan, iremos mirando capturas de cómo se ve.
+
+Este es un momento perfecto para commit antes de meternos con el frontend, porque el backend queda cerrado y estable. Un mensaje sencillo:
+
+feat(backend): API de mesa jugable con estado en memoria
