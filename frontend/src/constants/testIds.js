@@ -9,6 +9,7 @@ export const HOME = {
 export const NAV = {
   home: "nav-home",
   train: "nav-train",
+  play: "nav-play",
   stats: "nav-stats",
   review: "nav-review",
   admin: "nav-admin",
@@ -33,6 +34,27 @@ export const TRAIN = {
   feedbackBreakdown: "train-feedback-breakdown",
   restartBtn: "train-restart-btn",
   emptyState: "train-empty-state",
+};
+
+export const PLAY = {
+  screen: "play-screen",
+  setupForm: "play-setup-form",
+  newHandBtn: "play-new-hand-btn",
+  nextHandBtn: "play-next-hand-btn",
+  table: "play-table",
+  seatPrefix: "play-seat-",
+  heroCards: "play-hero-cards",
+  board: "play-board",
+  pot: "play-pot",
+  actionFold: "play-action-fold",
+  actionCheck: "play-action-check",
+  actionCall: "play-action-call",
+  actionRaise: "play-action-raise",
+  actionAllIn: "play-action-all-in",
+  raiseSlider: "play-raise-slider",
+  botLog: "play-bot-log",
+  errorBanner: "play-error-banner",
+  resultBanner: "play-result-banner",
 };
 
 export const STATS = {

@@ -1,5 +1,5 @@
 import { Link, NavLink } from "react-router-dom";
-import { Spade, LayoutDashboard, RotateCcw, Upload, Home } from "lucide-react";
+import { Spade, LayoutDashboard, RotateCcw, Upload, Home, Gamepad2 } from "lucide-react";
 import { NAV } from "@/constants/testIds";
 
 const linkBase =
@@ -40,6 +40,13 @@ export default function NavBar() {
             className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
           >
             <Spade className="w-4 h-4" /> Train
+          </NavLink>
+          <NavLink
+            to="/play"
+            data-testid={NAV.play}
+            className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
+          >
+            <Gamepad2 className="w-4 h-4" /> Play
           </NavLink>
           <NavLink
             to="/stats"

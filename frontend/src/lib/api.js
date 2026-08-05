@@ -41,3 +41,20 @@ export async function deleteAllScenarios() {
   const { data } = await client.delete("/scenarios");
   return data;
 }
+
+// ----------------- Live table (Play) -----------------
+
+export async function createTableHand(payload) {
+  const { data } = await client.post("/table/new", payload);
+  return data;
+}
+
+export async function fetchTableHand(handId) {
+  const { data } = await client.get(`/table/${handId}`);
+  return data;
+}
+
+export async function sendTableAction(handId, action, amount) {
+  const { data } = await client.post(`/table/${handId}/action`, { action, amount });
+  return data;
+}

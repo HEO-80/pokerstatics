@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import NavBar from "@/components/NavBar";
 import Home from "@/pages/Home";
 import Train from "@/pages/Train";
+import Play from "@/pages/Play";
 import Stats from "@/pages/Stats";
 import Review from "@/pages/Review";
 import Admin from "@/pages/Admin";
@@ -16,6 +17,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/train" element={<Train />} />
+          <Route path="/play" element={<Play />} />
           <Route path="/stats" element={<Stats />} />
           <Route path="/review" element={<Review />} />
           <Route path="/admin" element={<Admin />} />
