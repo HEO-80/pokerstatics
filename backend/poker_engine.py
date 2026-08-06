@@ -174,12 +174,47 @@ def _eval5(cards5: tuple[int, ...]) -> tuple:
 
 
 def best_of_seven(cards7: list[int]) -> tuple:
-    best = None
+    score, _cards = best_hand_with_cards(cards7)
+    return score
+
+
+def best_hand_with_cards(cards7: list[int]) -> tuple[tuple, list[int]]:
+    """
+    Como best_of_seven(), pero además devuelve las 5 cartas CONCRETAS (de las
+    7) que forman esa mejor combinación — pensado para que la UI pueda
+    resaltar exactamente esas cartas en el showdown.
+    """
+    best_score = None
+    best_combo = None
     for combo in combinations(cards7, 5):
         s = _eval5(combo)
-        if best is None or s > best:
-            best = s
-    return best
+        if best_score is None or s > best_score:
+            best_score = s
+            best_combo = combo
+    return best_score, list(best_combo)
+
+
+# Nombres legibles (ES) de cada categoría, indexados por el primer elemento
+# del score que devuelve best_of_seven()/best_hand_with_cards().
+CATEGORY_NAMES_ES = {
+    0: "Carta Alta",
+    1: "Pareja",
+    2: "Doble Pareja",
+    3: "Trío",
+    4: "Escalera",
+    5: "Color",
+    6: "Full",
+    7: "Póker",
+    8: "Escalera de Color",
+}
+
+
+def hand_category_name(score: tuple) -> str:
+    """Nombre legible en español de la categoría de un score de evaluación."""
+    category, high = score[0], score[1]
+    if category == 8 and high == 12:  # escalera de color con la A arriba
+        return "Escalera Real"
+    return CATEGORY_NAMES_ES.get(category, "Carta Alta")
 
 
 # ---------------------------------------------------------------------------

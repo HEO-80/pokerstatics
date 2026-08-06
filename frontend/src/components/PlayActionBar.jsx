@@ -2,17 +2,33 @@ import { useEffect, useState } from "react";
 import { Slider } from "@/components/ui/slider";
 import { PLAY } from "@/constants/testIds";
 
+const QUICK_SIZES = [
+  { label: "⅓ bote", fraction: 1 / 3, testId: PLAY.raiseThirdBtn },
+  { label: "½ bote", fraction: 1 / 2, testId: PLAY.raiseHalfBtn },
+  { label: "Bote", fraction: 1, testId: PLAY.raisePotBtn },
+];
+
 /**
  * Hero action controls. Only renders the actions present in `legalActions`
  * (as returned by hand.legal_actions() on the backend) — never guesses.
+ *
+ * El importe de raise se puede fijar de 3 formas, todas sincronizadas y
+ * acotadas a [min_to, max_to]: el slider, el input numérico, o los botones
+ * rápidos de tamaño (min / ⅓ / ½ / bote — pote calculado como
+ * currentBet + fracción × (pot + call), la fórmula estándar de "pot bet").
  */
-export default function PlayActionBar({ legalActions, onAction, disabled }) {
+export default function PlayActionBar({ legalActions, potTotal = 0, currentBet = 0, onAction, disabled }) {
   const raiseInfo = legalActions?.raise;
   const [raiseAmount, setRaiseAmount] = useState(raiseInfo?.min_to ?? 0);
+  const [inputValue, setInputValue] = useState(String(raiseInfo?.min_to ?? 0));
 
   useEffect(() => {
-    if (raiseInfo) setRaiseAmount(raiseInfo.min_to);
-  }, [raiseInfo?.min_to, raiseInfo?.max_to]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (raiseInfo) {
+      setRaiseAmount(raiseInfo.min_to);
+      setInputValue(String(raiseInfo.min_to));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [raiseInfo?.min_to, raiseInfo?.max_to]);
 
   if (!legalActions || Object.keys(legalActions).length === 0) {
     return (
@@ -22,11 +38,29 @@ export default function PlayActionBar({ legalActions, onAction, disabled }) {
     );
   }
 
+  const clampRaise = (value) => {
+    if (!raiseInfo || Number.isNaN(value)) return raiseInfo?.min_to ?? 0;
+    return Math.min(raiseInfo.max_to, Math.max(raiseInfo.min_to, Math.round(value)));
+  };
+
+  const commitRaise = (value) => {
+    const clamped = clampRaise(value);
+    setRaiseAmount(clamped);
+    setInputValue(String(clamped));
+  };
+
+  const setQuickSize = (fraction) => {
+    const callAmount = legalActions.call?.amount ?? 0;
+    commitRaise(currentBet + fraction * (potTotal + callAmount));
+  };
+
   const btnBase =
     "px-6 py-4 rounded-xl font-display font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+  const quickBtnBase =
+    "px-2.5 py-1 rounded-md border border-white/12 text-[10px] uppercase tracking-wide text-[#94A3B8] hover:text-white hover:border-white/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {legalActions.fold && (
           <button
@@ -81,25 +115,67 @@ export default function PlayActionBar({ legalActions, onAction, disabled }) {
       </div>
 
       {legalActions.raise && (
-        <div className="glass-panel rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">
+        <div className="glass-panel rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="text-[10px] uppercase tracking-widest text-[#475569] shrink-0">
               Raise amount
             </span>
-            <span className="font-mono-poker text-white font-bold">{raiseAmount}</span>
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              <button
+                type="button"
+                data-testid={PLAY.raiseMinBtn}
+                disabled={disabled}
+                onClick={() => commitRaise(raiseInfo.min_to)}
+                className={quickBtnBase}
+              >
+                Min
+              </button>
+              {QUICK_SIZES.map((q) => (
+                <button
+                  key={q.label}
+                  type="button"
+                  data-testid={q.testId}
+                  disabled={disabled}
+                  onClick={() => setQuickSize(q.fraction)}
+                  className={quickBtnBase}
+                >
+                  {q.label}
+                </button>
+              ))}
+              <input
+                type="number"
+                data-testid={PLAY.raiseInput}
+                disabled={disabled}
+                value={inputValue}
+                min={raiseInfo.min_to}
+                max={raiseInfo.max_to}
+                onChange={(e) => setInputValue(e.target.value)}
+                onBlur={() => commitRaise(Number(inputValue))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitRaise(Number(inputValue));
+                  }
+                }}
+                className="w-24 bg-[#0F1115] border border-white/12 rounded-lg px-2 py-1.5 text-white text-sm font-mono-poker text-right focus:outline-none focus:border-[#3B82F6]"
+              />
+            </div>
           </div>
           <Slider
             data-testid={PLAY.raiseSlider}
-            disabled={disabled || legalActions.raise.min_to >= legalActions.raise.max_to}
-            min={legalActions.raise.min_to}
-            max={legalActions.raise.max_to}
+            disabled={disabled || raiseInfo.min_to >= raiseInfo.max_to}
+            min={raiseInfo.min_to}
+            max={raiseInfo.max_to}
             step={1}
             value={[raiseAmount]}
-            onValueChange={([v]) => setRaiseAmount(v)}
+            onValueChange={([v]) => {
+              setRaiseAmount(v);
+              setInputValue(String(v));
+            }}
           />
-          <div className="flex justify-between mt-1 text-[10px] text-[#475569] font-mono-poker">
-            <span>{legalActions.raise.min_to}</span>
-            <span>{legalActions.raise.max_to}</span>
+          <div className="flex justify-between text-[10px] text-[#475569] font-mono-poker">
+            <span>{raiseInfo.min_to}</span>
+            <span>{raiseInfo.max_to}</span>
           </div>
         </div>
       )}

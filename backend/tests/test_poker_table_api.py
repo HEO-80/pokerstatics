@@ -133,6 +133,86 @@ def test_illegal_action_returns_400_and_does_not_corrupt_state():
 
 
 # ---------------------------------------------------------------------------
+# d) El campo `stacks` permite encadenar una mano nueva con los stacks
+#    finales de la anterior (torneo de una sola mesa: el stack no se resetea).
+# ---------------------------------------------------------------------------
+def test_new_hand_can_carry_over_stacks_from_a_previous_hand():
+    resp = client.post("/api/table/new", json={
+        "num_players": 3,
+        "starting_stack": 200,
+        "sb": 5,
+        "bb": 10,
+        "hero_seat": 0,
+        "button": 0,
+        "bot_profiles": "tag",
+    })
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    hand_id = data["hand_id"]
+
+    snapshots = _drive_hero_to_completion(hand_id)
+    final = snapshots[-1]
+    assert final["finished"] is True
+
+    carried_stacks = {str(p["seat"]): p["stack"] for p in final["players"]}
+    # Manipulamos los números a propósito para que sea evidente que la mano
+    # nueva usa ESTOS stacks y no starting_stack de nuevo.
+    assert any(v != 200 for v in carried_stacks.values()), (
+        "la mano de prueba no movió fichas; ajusta el escenario"
+    )
+
+    resp2 = client.post("/api/table/new", json={
+        "num_players": 3,
+        "starting_stack": 200,  # se ignora para los asientos presentes en `stacks`
+        "sb": 5,
+        "bb": 10,
+        "hero_seat": 0,
+        "button": 1,
+        "bot_profiles": "tag",
+        "stacks": carried_stacks,
+    })
+    assert resp2.status_code == 200, resp2.text
+    data2 = resp2.json()
+
+    if not data2["finished"]:
+        # Caso habitual: al hero todavía le queda una decisión (como mucho se
+        # han publicado las ciegas). stack+total_committed == lo que se pasó
+        # en `stacks` para cada asiento (comprometer fichas solo las mueve de
+        # "stack" a "total_committed", la suma no cambia).
+        got_stacks = {p["seat"]: p["stack"] + p["total_committed"] for p in data2["players"]}
+        for seat_str, expected in carried_stacks.items():
+            assert got_stacks[int(seat_str)] == expected, (
+                f"asiento {seat_str}: stack no se arrastró bien "
+                f"(esperado {expected}, obtenido {got_stacks[int(seat_str)]})"
+            )
+    else:
+        # Caso raro pero válido (los bots no llevan seed fija): ambos rivales
+        # se retiraron ante la ciega grande del hero antes de que le tocara
+        # actuar, y la mano 2 termina sola dentro de la misma llamada a
+        # /table/new. _settle() ya sumó el bote al "stack" de quien ganó, así
+        # que aquí el invariante correcto es solo sobre "stack" (sumar
+        # también total_committed contaría el bote ganado dos veces).
+        total_stack_only = sum(p["stack"] for p in data2["players"])
+        assert total_stack_only == sum(carried_stacks.values()), (
+            "las fichas totales no se conservaron (mano 2 terminó sola antes "
+            "de que el hero pudiera actuar)"
+        )
+
+
+def test_new_hand_stacks_rejects_out_of_range_seat():
+    resp = client.post("/api/table/new", json={
+        "num_players": 2,
+        "starting_stack": 100,
+        "sb": 1,
+        "bb": 2,
+        "hero_seat": 0,
+        "stacks": {"5": 50},
+    })
+    assert resp.status_code == 400
+    assert "detail" in resp.json()
+
+
+# ---------------------------------------------------------------------------
 # c) Al crear la mano, siempre es turno del hero o la mano ya terminó.
 # ---------------------------------------------------------------------------
 def test_new_hand_never_hangs_on_a_bot_turn():
@@ -153,3 +233,61 @@ def test_new_hand_never_hangs_on_a_bot_turn():
             f"mano #{i} (n={n}, hero={hero_seat}) colgada en asiento "
             f"{data['current_seat']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# e) El flujo normal de jugar (sin reiniciar el servidor) NUNCA debe perder
+#    el hand_id: varias manos seguidas, muchas acciones consecutivas cada
+#    una, y ni un solo 404 "Mano no encontrada" en todo el camino.
+#
+#    Esto es justo lo que reproduce el bug reportado ("a veces, tras un
+#    Call, la API responde Mano no encontrada"): la causa real NO es un bug
+#    de este código (nunca falla aquí) sino que el almacén en memoria de
+#    HandStore se vacía si el proceso de uvicorn se reinicia — y con
+#    `--reload`, CUALQUIER cambio de archivo en backend/ dispara ese
+#    reinicio aunque no tenga relación con la mano en curso. Ver la nota en
+#    el docstring de poker_table_api.py.
+# ---------------------------------------------------------------------------
+def test_multiple_consecutive_actions_never_lose_the_hand():
+    hand_ids_seen = set()
+
+    for hand_num in range(5):
+        resp = client.post("/api/table/new", json={
+            "num_players": 3 + (hand_num % 3),
+            "starting_stack": 200,
+            "sb": 5,
+            "bb": 10,
+            "hero_seat": 0,
+            "bot_profiles": "tag",
+        })
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        hand_id = data["hand_id"]
+        hand_ids_seen.add(hand_id)
+
+        # GET también debe encontrar la mano recién creada, siempre.
+        get_resp = client.get(f"/api/table/{hand_id}")
+        assert get_resp.status_code == 200, get_resp.text
+        assert get_resp.json()["hand_id"] == hand_id
+
+        steps = 0
+        while not data["finished"] and steps < 60:
+            legal = data["legal_actions"]
+            action = "check" if "check" in legal else "call"
+            resp = client.post(f"/api/table/{hand_id}/action", json={"action": action})
+            assert resp.status_code == 200, (
+                f"mano {hand_id} (hand_num={hand_num}, step={steps}): "
+                f"perdida a mitad de partida — {resp.status_code} {resp.text}"
+            )
+            data = resp.json()
+            assert data["hand_id"] == hand_id, "el hand_id cambió solo sin pedirlo"
+            steps += 1
+
+        assert data["finished"], f"mano {hand_id} no terminó en {steps} pasos"
+
+        # Tras terminar, la mano sigue siendo consultable por su mismo id
+        # (no desaparece del almacén solo por haber acabado).
+        final_get = client.get(f"/api/table/{hand_id}")
+        assert final_get.status_code == 200, final_get.text
+
+    assert len(hand_ids_seen) == 5, "se esperaban 5 hand_id distintos, una por mano"

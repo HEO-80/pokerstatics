@@ -35,7 +35,7 @@ export default function Home() {
 
           <div className="mt-10 flex flex-wrap gap-3">
             <Link
-              to="/train"
+              to="/tournament"
               data-testid={HOME.startTournamentBtn}
               className="group px-8 py-5 rounded-xl bg-white text-black font-display font-bold uppercase tracking-wider text-xl hover:bg-white/90 transition-colors inline-flex items-center gap-3"
             >

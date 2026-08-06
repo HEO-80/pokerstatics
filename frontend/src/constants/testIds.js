@@ -9,7 +9,9 @@ export const HOME = {
 export const NAV = {
   home: "nav-home",
   train: "nav-train",
-  play: "nav-play",
+  practice: "nav-practice",
+  tournament: "nav-tournament",
+  sitandgo: "nav-sitandgo",
   stats: "nav-stats",
   review: "nav-review",
   admin: "nav-admin",
@@ -52,9 +54,35 @@ export const PLAY = {
   actionRaise: "play-action-raise",
   actionAllIn: "play-action-all-in",
   raiseSlider: "play-raise-slider",
+  raiseInput: "play-raise-input",
+  raiseMinBtn: "play-raise-min-btn",
+  raiseThirdBtn: "play-raise-third-btn",
+  raiseHalfBtn: "play-raise-half-btn",
+  raisePotBtn: "play-raise-pot-btn",
   botLog: "play-bot-log",
   errorBanner: "play-error-banner",
   resultBanner: "play-result-banner",
+};
+
+export const TOURNAMENT = {
+  screen: "tournament-screen",
+  lobby: "tournament-lobby",
+  startBtn: "tournament-start-btn",
+  exitBtn: "tournament-exit-btn",
+  nextHandBtn: "tournament-next-hand-btn",
+  eliminatedScreen: "tournament-eliminated-screen",
+  newTournamentBtn: "tournament-new-btn",
+};
+
+export const SITANDGO = {
+  screen: "sitandgo-screen",
+  lobby: "sitandgo-lobby",
+  startBtn: "sitandgo-start-btn",
+  exitBtn: "sitandgo-exit-btn",
+  nextHandBtn: "sitandgo-next-hand-btn",
+  bustedScreen: "sitandgo-busted-screen",
+  wonScreen: "sitandgo-won-screen",
+  backToLobbyBtn: "sitandgo-back-to-lobby-btn",
 };
 
 export const STATS = {

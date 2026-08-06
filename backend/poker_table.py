@@ -20,7 +20,7 @@ import random
 from dataclasses import dataclass, field
 from enum import Enum
 
-from poker_engine import FULL_DECK, best_of_seven
+from poker_engine import FULL_DECK, best_hand_with_cards, hand_category_name
 
 
 class HandError(Exception):
@@ -439,23 +439,50 @@ class Hand:
         return [s for s in order if s in winners]
 
     def _settle(self) -> None:
+        # Solo se revela la categoría/cartas ganadoras en un showdown real
+        # (mostrar la mano no tiene sentido cuando todos los demás foldearon:
+        # el ganador se la lleva sin enseñar nada, como en una mesa real).
+        show_hands = self.street == Street.SHOWDOWN
+
         pots = self._compute_pots()
         results = []
         for pot in pots:
             eligible = pot["eligible"]
+            hand_name = None
+            winning_hands: dict[int, list[int]] = {}
+
             if len(eligible) == 1:
                 winners = eligible
+                if show_hands:
+                    score, cards = best_hand_with_cards(self.players[eligible[0]].hole_cards + self.board)
+                    hand_name = hand_category_name(score)
+                    winning_hands = {eligible[0]: cards}
             else:
-                scores = {s: best_of_seven(self.players[s].hole_cards + self.board) for s in eligible}
-                best = max(scores.values())
-                winners = [s for s in eligible if scores[s] == best]
+                scored = {
+                    s: best_hand_with_cards(self.players[s].hole_cards + self.board) for s in eligible
+                }
+                best_score = max(score for score, _ in scored.values())
+                winners = [s for s in eligible if scored[s][0] == best_score]
+                if show_hands:
+                    hand_name = hand_category_name(best_score)
+                    winning_hands = {s: scored[s][1] for s in winners}
 
             share, remainder = divmod(pot["amount"], len(winners))
             payout_order = self._payout_order(winners)
+            payouts: dict[int, float] = {}
             for i, seat in enumerate(payout_order):
                 amt = share + (1 if i < remainder else 0)
                 self.players[seat].stack += amt
-            results.append({"amount": pot["amount"], "winners": winners, "share": share})
+                payouts[seat] = amt
+
+            results.append({
+                "amount": pot["amount"],
+                "winners": winners,
+                "share": share,
+                "payouts": payouts,
+                "hand_name": hand_name,
+                "winning_hands": winning_hands,
+            })
 
         self.winners_by_pot = results
         self.is_complete = True

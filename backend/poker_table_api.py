@@ -17,7 +17,21 @@ Endpoints:
 Persistencia: en memoria (HandStore, dict a nivel de módulo keyed por hand_id).
 Es una app local de un jugador: no hace falta Mongo. HandStore está aislado en
 su propia clase para poder cambiar el backend de almacenamiento más adelante
-sin tocar los endpoints. El estado se pierde si el servidor reinicia.
+sin tocar los endpoints.
+
+IMPORTANTE (dev con --reload): _STORE vive en la memoria del proceso de
+uvicorn. Cualquier reinicio de ese proceso lo vacía por completo — y con
+`uvicorn --reload`, CUALQUIER cambio en un archivo dentro del directorio
+observado (por defecto, el propio backend/) dispara ese reinicio, aunque el
+cambio no tenga nada que ver con esta mano en curso. Si editas backend/*.py
+mientras hay una partida abierta en el navegador, su siguiente acción
+devolverá 404 "Mano no encontrada" — esto es esperado en desarrollo, no un
+bug de la lógica de la mesa (confirmado con tests: sin reinicios de por
+medio, una secuencia larga de acciones consecutivas nunca pierde el
+hand_id — ver test_multiple_consecutive_actions_never_lose_the_hand en
+tests/test_poker_table_api.py). El frontend, por su parte, detecta un 404 en
+cualquier llamada a la mesa y vuelve a la pantalla de configuración con un
+aviso en vez de dejar la mano "congelada" (ver useTableSession.js).
 
 Seguridad del juego: la vista que se devuelve (_hero_view) NUNCA incluye las
 cartas de los rivales mientras la mano no haya terminado (fold-out o showdown);
@@ -87,6 +101,11 @@ class NewHandIn(BaseModel):
     button: Optional[int] = None
     hero_seat: int = 0
     bot_profiles: Optional[Union[str, Dict[str, str]]] = None
+    # Override opcional de stack por asiento ({"0": 84, "1": 116, ...}). Pensado
+    # para encadenar manos de un torneo de una sola mesa: el caller pasa los
+    # stacks finales de la mano anterior en vez de repartir starting_stack a
+    # todos. Cualquier asiento ausente del dict usa starting_stack.
+    stacks: Optional[Dict[str, float]] = None
 
 
 class ActionIn(BaseModel):
@@ -123,9 +142,34 @@ def _resolve_bot_profiles(num_players: int, hero_seat: int, bot_profiles) -> Dic
     return profiles
 
 
-def _build_players(num_players: int, hero_seat: int, starting_stack: float) -> list[PlayerState]:
+def _resolve_stack_overrides(num_players: int, stacks: Optional[Dict[str, float]]) -> Dict[int, float]:
+    if not stacks:
+        return {}
+    overrides: Dict[int, float] = {}
+    for key, value in stacks.items():
+        try:
+            seat = int(key)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"Asiento inválido en stacks: {key!r}.")
+        if not (0 <= seat < num_players):
+            raise HTTPException(status_code=400, detail=f"Asiento fuera de rango en stacks: {seat}.")
+        if value < 0:
+            raise HTTPException(status_code=400, detail="Los stacks no pueden ser negativos.")
+        overrides[seat] = value
+    return overrides
+
+
+def _build_players(
+    num_players: int, hero_seat: int, starting_stack: float,
+    stack_overrides: Optional[Dict[int, float]] = None,
+) -> list[PlayerState]:
+    stack_overrides = stack_overrides or {}
     return [
-        PlayerState(seat=s, name=("Hero" if s == hero_seat else f"Bot{s}"), stack=starting_stack)
+        PlayerState(
+            seat=s,
+            name=("Hero" if s == hero_seat else f"Bot{s}"),
+            stack=stack_overrides.get(s, starting_stack),
+        )
         for s in range(num_players)
     ]
 
@@ -198,7 +242,8 @@ async def new_hand(body: NewHandIn):
         raise HTTPException(status_code=400, detail="button fuera de rango.")
 
     bot_profiles = _resolve_bot_profiles(body.num_players, body.hero_seat, body.bot_profiles)
-    players = _build_players(body.num_players, body.hero_seat, body.starting_stack)
+    stack_overrides = _resolve_stack_overrides(body.num_players, body.stacks)
+    players = _build_players(body.num_players, body.hero_seat, body.starting_stack, stack_overrides)
 
     try:
         hand = Hand(players, button_seat=button, sb=body.sb, bb=body.bb, ante=body.ante)
