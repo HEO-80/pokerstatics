@@ -1,24 +1,27 @@
 import { useCallback, useRef, useState } from "react";
-import { Swords, RotateCw, LogOut, Skull } from "lucide-react";
+import { Swords, RotateCw, LogOut, Skull, TrendingUp } from "lucide-react";
 import HandTable from "@/components/HandTable";
 import { createTableHand } from "@/lib/api";
 import { seatRoles } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { TOURNAMENT } from "@/constants/testIds";
+import { blindsForLevel, createLevelTracker, advanceLevelTracker } from "@/lib/blindLevels";
 
 // Modo Torneo — ESQUELETO MÍNIMO: una sola mesa, sin mesas paralelas, sin
-// ICM, sin blinds que suben y sin ranking. La única diferencia real con
-// Práctica es que el stack de TODOS los asientos (hero y bots) se arrastra
-// de una mano a la siguiente vía el override `stacks` de POST /table/new,
-// hasta que el hero se queda a 0 (Eliminado). Los bots nunca se eliminan de
-// la mesa: si se quedan a 0 simplemente siguen sentados (all-in a la fuerza).
+// ICM y sin ranking. La única diferencia real con Práctica es que el stack
+// de TODOS los asientos (hero y bots) se arrastra de una mano a la siguiente
+// vía el override `stacks` de POST /table/new, hasta que el hero se queda a
+// 0 (Eliminado). Los bots nunca se eliminan de la mesa: si se quedan a 0
+// simplemente siguen sentados (all-in a la fuerza) — por eso el nº de
+// asientos (cfg.numPlayers) es constante durante toda la partida, a
+// diferencia de Sit&Go, y la "vuelta del botón" para subir de nivel de
+// ciegas (ver lib/blindLevels.js) siempre dura lo mismo: cfg.numPlayers
+// manos.
 const HERO_SEAT = 0;
 
 const LOBBY_DEFAULTS = {
   opponents: 5,
   startingStack: 100,
-  sb: 1,
-  bb: 2,
 };
 
 const fieldClass =
@@ -34,16 +37,25 @@ export default function Tournament() {
   // que hacía que el hero, sentado siempre en el asiento 0, fuera SIEMPRE el
   // dealer inicial). Una vez hay un valor, rota normalmente (+1 por mano).
   const nextButtonRef = useRef(null);
+  // Nivel de ciegas actual + nº de manos jugadas en él, ver lib/blindLevels.js.
+  // Igual que nextButtonRef, vive en un ref para tener el valor síncrono
+  // disponible al construir la llamada a createTableHand; levelInfo (state)
+  // es solo el espejo para pintar el HUD.
+  const levelTrackerRef = useRef(createLevelTracker());
+  const [levelInfo, setLevelInfo] = useState(createLevelTracker());
   const { view, botLog, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
     useTableSession();
 
   const dealHand = useCallback(
-    async (cfg, stacksBySeat) => {
+    async (cfg, stacksBySeat, tracker) => {
       const button =
         nextButtonRef.current === null
           ? Math.floor(Math.random() * cfg.numPlayers)
           : nextButtonRef.current % cfg.numPlayers;
       nextButtonRef.current = button + 1;
+      levelTrackerRef.current = tracker;
+      setLevelInfo(tracker);
+      const blinds = blindsForLevel(tracker.level);
       // Fijar el botón y pasar a "playing" ANTES de llamar a dealAnimated (no
       // después, como estaba): dealAnimated no resuelve hasta que termina TODO
       // el reparto animado + la reproducción de las acciones de los bots, así
@@ -61,14 +73,14 @@ export default function Tournament() {
           createTableHand({
             num_players: cfg.numPlayers,
             starting_stack: cfg.startingStack,
-            sb: cfg.sb,
-            bb: cfg.bb,
+            sb: blinds.sb,
+            bb: blinds.bb,
             button,
             hero_seat: HERO_SEAT,
             bot_profiles: "tag",
             ...(stacksBySeat ? { stacks: stacksBySeat } : {}),
           }),
-        { heroSeat: HERO_SEAT, buttonSeat: button, stacksBySeat: stacks, sb: cfg.sb, bb: cfg.bb },
+        { heroSeat: HERO_SEAT, buttonSeat: button, stacksBySeat: stacks, sb: blinds.sb, bb: blinds.bb },
         () => setPhase("lobby"),
       );
       if (!data) setPhase("lobby");
@@ -81,12 +93,10 @@ export default function Tournament() {
     const cfg = {
       numPlayers: Number(lobby.opponents) + 1,
       startingStack: Number(lobby.startingStack),
-      sb: Number(lobby.sb),
-      bb: Number(lobby.bb),
     };
     setConfig(cfg);
     nextButtonRef.current = null;
-    dealHand(cfg);
+    dealHand(cfg, null, createLevelTracker());
   };
 
   const nextHand = () => {
@@ -95,7 +105,10 @@ export default function Tournament() {
     view.players.forEach((p) => {
       stacksBySeat[String(p.seat)] = p.stack;
     });
-    dealHand(config, stacksBySeat);
+    // cfg.numPlayers es constante en Torneo (los bots nunca se quitan de la
+    // mesa), así que la vuelta del botón siempre dura cfg.numPlayers manos.
+    const tracker = advanceLevelTracker(levelTrackerRef.current, config.numPlayers);
+    dealHand(config, stacksBySeat, tracker);
   };
 
   const backToLobby = () => {
@@ -123,6 +136,20 @@ export default function Tournament() {
             <div className="text-xs text-[#475569] font-mono-poker">
               Tu stack: <span className="text-white font-bold">{heroStack}</span>
             </div>
+            <div
+              data-testid={TOURNAMENT.levelBadge}
+              className="flex items-center gap-1.5 text-xs text-[#475569] font-mono-poker"
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              Nivel <span className="text-white font-bold">{levelInfo.level}</span> · Ciegas{" "}
+              <span className="text-white font-bold">
+                {blindsForLevel(levelInfo.level).sb}/{blindsForLevel(levelInfo.level).bb}
+              </span>
+              <span className="text-[#475569]">
+                · Sube en {Math.max(1, (config?.numPlayers ?? 0) - levelInfo.handsAtLevel)} mano
+                {Math.max(1, (config?.numPlayers ?? 0) - levelInfo.handsAtLevel) === 1 ? "" : "s"}
+              </span>
+            </div>
             <button
               data-testid={TOURNAMENT.exitBtn}
               onClick={backToLobby}
@@ -140,6 +167,14 @@ export default function Tournament() {
           onSubmit={startTournament}
           className="glass-panel rounded-2xl p-6 grid grid-cols-2 md:grid-cols-4 gap-4 items-end max-w-2xl"
         >
+          <div className="col-span-2 md:col-span-4 text-xs text-[#94A3B8]">
+            Ciegas iniciales{" "}
+            <span className="text-white font-mono-poker font-bold">
+              {blindsForLevel(1).sb}/{blindsForLevel(1).bb}
+            </span>{" "}
+            (Nivel 1) — suben solas cada vez que el botón completa una vuelta a la mesa.
+          </div>
+
           <label className="flex flex-col gap-1.5">
             <span className="text-[10px] uppercase tracking-widest text-[#475569]">Rivales (2-8)</span>
             <select
@@ -162,30 +197,6 @@ export default function Tournament() {
               min={1}
               value={lobby.startingStack}
               onChange={(e) => setLobby((l) => ({ ...l, startingStack: e.target.value }))}
-              className={fieldClass}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">SB</span>
-            <input
-              type="number"
-              min={0.01}
-              step="any"
-              value={lobby.sb}
-              onChange={(e) => setLobby((l) => ({ ...l, sb: e.target.value }))}
-              className={fieldClass}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">BB</span>
-            <input
-              type="number"
-              min={0.01}
-              step="any"
-              value={lobby.bb}
-              onChange={(e) => setLobby((l) => ({ ...l, bb: e.target.value }))}
               className={fieldClass}
             />
           </label>

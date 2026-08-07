@@ -1,10 +1,11 @@
 import { useCallback, useRef, useState } from "react";
-import { Crown, RotateCw, LogOut, Skull, Trophy } from "lucide-react";
+import { Crown, RotateCw, LogOut, Skull, Trophy, TrendingUp } from "lucide-react";
 import HandTable from "@/components/HandTable";
 import { createTableHand } from "@/lib/api";
 import { seatRoles } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { SITANDGO } from "@/constants/testIds";
+import { blindsForLevel, createLevelTracker, advanceLevelTracker } from "@/lib/blindLevels";
 
 // Sit & Go — ESQUELETO MÍNIMO: siempre 9 asientos (tú + 8 bots) en UNA sola
 // mesa, sin mesas paralelas ni simulación de otros jugadores. El stack de
@@ -19,8 +20,6 @@ const TOTAL_SEATS = 9;
 
 const LOBBY_DEFAULTS = {
   startingStack: 100,
-  sb: 1,
-  bb: 2,
   botProfile: "tag",
 };
 
@@ -50,16 +49,25 @@ export default function SitAndGo() {
   // que hacía que el hero, sentado siempre en el asiento 0, fuera SIEMPRE el
   // dealer inicial). Una vez hay un valor, rota normalmente (+1 por mano).
   const nextButtonRef = useRef(null);
+  // Nivel de ciegas actual + nº de manos jugadas en él, ver lib/blindLevels.js.
+  // Igual que nextButtonRef, vive en un ref para tener el valor síncrono
+  // disponible al construir la llamada a createTableHand; levelInfo (state)
+  // es solo el espejo para pintar el HUD.
+  const levelTrackerRef = useRef(createLevelTracker());
+  const [levelInfo, setLevelInfo] = useState(createLevelTracker());
   const { view, botLog, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
     useTableSession();
 
   const dealHand = useCallback(
-    async (cfg, numPlayers, stacksBySeat) => {
+    async (cfg, numPlayers, stacksBySeat, tracker) => {
       const button =
         nextButtonRef.current === null
           ? Math.floor(Math.random() * numPlayers)
           : nextButtonRef.current % numPlayers;
       nextButtonRef.current = button + 1;
+      levelTrackerRef.current = tracker;
+      setLevelInfo(tracker);
+      const blinds = blindsForLevel(tracker.level);
       // Fijar el botón y pasar a "playing" ANTES de llamar a dealAnimated (no
       // después, como estaba): dealAnimated no resuelve hasta que termina TODO
       // el reparto animado + la reproducción de las acciones de los bots, así
@@ -77,14 +85,14 @@ export default function SitAndGo() {
           createTableHand({
             num_players: numPlayers,
             starting_stack: cfg.startingStack,
-            sb: cfg.sb,
-            bb: cfg.bb,
+            sb: blinds.sb,
+            bb: blinds.bb,
             button,
             hero_seat: HERO_SEAT,
             bot_profiles: cfg.botProfile,
             ...(stacksBySeat ? { stacks: stacksBySeat } : {}),
           }),
-        { heroSeat: HERO_SEAT, buttonSeat: button, stacksBySeat: stacks, sb: cfg.sb, bb: cfg.bb },
+        { heroSeat: HERO_SEAT, buttonSeat: button, stacksBySeat: stacks, sb: blinds.sb, bb: blinds.bb },
         () => setPhase("lobby"),
       );
       if (!data) setPhase("lobby");
@@ -96,19 +104,22 @@ export default function SitAndGo() {
     e.preventDefault();
     const cfg = {
       startingStack: Number(lobby.startingStack),
-      sb: Number(lobby.sb),
-      bb: Number(lobby.bb),
       botProfile: lobby.botProfile,
     };
     setConfig(cfg);
     nextButtonRef.current = null;
-    dealHand(cfg, TOTAL_SEATS);
+    dealHand(cfg, TOTAL_SEATS, null, createLevelTracker());
   };
 
   const nextHand = () => {
     if (!view || !config) return;
     const { numPlayers, stacks } = buildSurvivorHand(view.players, HERO_SEAT);
-    dealHand(config, numPlayers, stacks);
+    // El nº de vivos con el que se reparte la mano que viene YA refleja las
+    // eliminaciones de la mano que acaba de terminar -> exactamente el
+    // "numPlayers actual" que advanceLevelTracker necesita para acortar la
+    // vuelta cuando ha caído alguien.
+    const tracker = advanceLevelTracker(levelTrackerRef.current, numPlayers);
+    dealHand(config, numPlayers, stacks, tracker);
   };
 
   const backToLobby = () => {
@@ -143,6 +154,20 @@ export default function SitAndGo() {
               Quedan <span className="text-white font-bold">{survivorsLeft}</span>/{TOTAL_SEATS} · Tu
               stack: <span className="text-white font-bold">{heroStack}</span>
             </div>
+            <div
+              data-testid={SITANDGO.levelBadge}
+              className="flex items-center gap-1.5 text-xs text-[#475569] font-mono-poker"
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              Nivel <span className="text-white font-bold">{levelInfo.level}</span> · Ciegas{" "}
+              <span className="text-white font-bold">
+                {blindsForLevel(levelInfo.level).sb}/{blindsForLevel(levelInfo.level).bb}
+              </span>
+              <span className="text-[#475569]">
+                · Sube en {Math.max(1, survivorsLeft - levelInfo.handsAtLevel)} mano
+                {Math.max(1, survivorsLeft - levelInfo.handsAtLevel) === 1 ? "" : "s"}
+              </span>
+            </div>
             <button
               data-testid={SITANDGO.exitBtn}
               onClick={backToLobby}
@@ -162,7 +187,11 @@ export default function SitAndGo() {
         >
           <div className="col-span-2 md:col-span-4 text-xs text-[#94A3B8]">
             Mesa única de {TOTAL_SEATS} jugadores (tú + {TOTAL_SEATS - 1} bots). Se juega hasta que
-            quede 1.
+            quede 1. Ciegas iniciales{" "}
+            <span className="text-white font-mono-poker font-bold">
+              {blindsForLevel(1).sb}/{blindsForLevel(1).bb}
+            </span>{" "}
+            (Nivel 1) — suben solas cada vez que el botón completa una vuelta a la mesa.
           </div>
 
           <label className="flex flex-col gap-1.5">
@@ -172,30 +201,6 @@ export default function SitAndGo() {
               min={1}
               value={lobby.startingStack}
               onChange={(e) => setLobby((l) => ({ ...l, startingStack: e.target.value }))}
-              className={fieldClass}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">SB</span>
-            <input
-              type="number"
-              min={0.01}
-              step="any"
-              value={lobby.sb}
-              onChange={(e) => setLobby((l) => ({ ...l, sb: e.target.value }))}
-              className={fieldClass}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">BB</span>
-            <input
-              type="number"
-              min={0.01}
-              step="any"
-              value={lobby.bb}
-              onChange={(e) => setLobby((l) => ({ ...l, bb: e.target.value }))}
               className={fieldClass}
             />
           </label>

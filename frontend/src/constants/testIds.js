@@ -76,6 +76,7 @@ export const TOURNAMENT = {
   nextHandBtn: "tournament-next-hand-btn",
   eliminatedScreen: "tournament-eliminated-screen",
   newTournamentBtn: "tournament-new-btn",
+  levelBadge: "tournament-level-badge",
 };
 
 export const SITANDGO = {
@@ -87,6 +88,7 @@ export const SITANDGO = {
   bustedScreen: "sitandgo-busted-screen",
   wonScreen: "sitandgo-won-screen",
   backToLobbyBtn: "sitandgo-back-to-lobby-btn",
+  levelBadge: "sitandgo-level-badge",
 };
 
 export const STATS = {
