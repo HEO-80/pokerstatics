@@ -18,8 +18,33 @@ import { PLAY } from "@/constants/testIds";
  * counter-clockwise (the reported bug) even though poker_table.py's turn
  * order (ascending seat number from the button) was already correct.
  */
-function seatPoint(offset, numPlayers, radiusX, radiusY) {
-  const angle = (offset * 2 * Math.PI) / numPlayers; // 0 = bottom
+function seatAngleDeg(offset, seatCount) {
+  const table = SEAT_ANGLES_DEG[seatCount];
+  if (table) return table[offset];
+  return (offset * 360) / seatCount;
+}
+
+/**
+ * Ángulos (grados, 0 = abajo/hero, crece en sentido horario) para mesas de 9
+ * asientos — la única cantidad con la que arranca Sit&Go y a la que puede
+ * llegar Torneo (8 rivales + hero). Con paso uniforme (40°) los offsets 2-3 y
+ * 6-7 caen justo a ambos lados del punto cardinal lateral del óvalo: ahí la
+ * elipse es casi plana verticalmente (poca separación en Y entre asientos
+ * consecutivos) mientras que en X sus centros casi coinciden — la combinación
+ * hace que la caja de cartas de uno se solape con la caja de nombre/fichas
+ * del asiento vecino (comprobado en pantalla con capturas reales, no solo a
+ * ojo). Esta tabla ensancha esos dos huecos (40°→65°) y le quita ese margen a
+ * los huecos vecinos (40°→30° / 40°→25°), que tenían de sobra. Deja intactos
+ * los asientos de arriba (4,5) y el hueco junto al hero (0-1 / 8-0). Para
+ * cualquier otro nº de asientos se seguía usando el paso uniforme de siempre
+ * (no hay overlap reportado ahí).
+ */
+const SEAT_ANGLES_DEG = {
+  9: [0, 40, 70, 135, 160, 200, 225, 290, 320],
+};
+
+function seatPoint(offset, seatCount, radiusX, radiusY) {
+  const angle = (seatAngleDeg(offset, seatCount) * Math.PI) / 180; // 0 = bottom
   const x = 50 - radiusX * Math.sin(angle);
   const y = 50 + radiusY * Math.cos(angle);
   return { x, y };
@@ -109,14 +134,27 @@ export default function PlayTable({
   highlightedCards,
   dealing = false,
   onSkipDeal,
+  // Nº de asientos del anillo fijo del óvalo (por defecto, players.length —
+  // el comportamiento de siempre para Práctica/Torneo, donde el asiento del
+  // backend YA es estable). Sit&Go pasa un valor fijo (9) y, en cada jugador,
+  // `visualSlot` (identidad estable asignada al empezar la partida, ver
+  // SitAndGo.jsx) en vez de dejar que la posición dependa de `seat` — que el
+  // backend renumera 0..k-1 en cada mano según sobrevive gente. Así, al
+  // eliminarse alguien, su hueco en el anillo desaparece pero NADIE MÁS
+  // cambia de sitio (antes sí, porque la posición se calculaba a partir del
+  // ÍNDICE de cada jugador dentro del array `players`, que se recalculaba de
+  // cero cada mano).
+  totalSeats,
 }) {
-  const numPlayers = players.length;
-  const heroIndex = players.findIndex((p) => p.seat === heroSeat);
+  const seatCount = totalSeats ?? players.length;
+  const heroPlayer = players.find((p) => p.seat === heroSeat);
+  const heroSlot = heroPlayer ? (heroPlayer.visualSlot ?? heroPlayer.seat) : 0;
   const bubbleLabel = actionBubbleLabel(actionBubble);
-  const seatPositions = players.map((p, i) => ({
-    seat: p.seat,
-    ...seatPoint((i - heroIndex + numPlayers) % numPlayers, numPlayers, 43, 38),
-  }));
+  const seatPositions = players.map((p) => {
+    const slot = p.visualSlot ?? p.seat;
+    const offset = ((slot - heroSlot) % seatCount + seatCount) % seatCount;
+    return { seat: p.seat, ...seatPoint(offset, seatCount, 43, 38) };
+  });
 
   return (
     <div className="relative h-full w-full" data-testid={PLAY.table}>

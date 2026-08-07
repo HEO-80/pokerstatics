@@ -6,6 +6,7 @@ import { seatRoles } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { TOURNAMENT } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker } from "@/lib/blindLevels";
+import { pickRandomNames } from "@/lib/playerNames";
 
 // Modo Torneo — ESQUELETO MÍNIMO: una sola mesa, sin mesas paralelas, sin
 // ICM y sin ranking. La única diferencia real con Práctica es que el stack
@@ -20,6 +21,7 @@ import { blindsForLevel, createLevelTracker, advanceLevelTracker } from "@/lib/b
 const HERO_SEAT = 0;
 
 const LOBBY_DEFAULTS = {
+  heroName: "",
   opponents: 5,
   startingStack: 100,
 };
@@ -43,6 +45,11 @@ export default function Tournament() {
   // es solo el espejo para pintar el HUD.
   const levelTrackerRef = useRef(createLevelTracker());
   const [levelInfo, setLevelInfo] = useState(createLevelTracker());
+  // Nombre persistente por asiento (slot 0 = hero), fijado una vez al
+  // empezar el torneo. A diferencia de Sit&Go, aquí el asiento de backend
+  // nunca se renumera (los bots eliminados se quedan sentados a 0), así que
+  // no hace falta ninguna traducción de posición — solo el nombre.
+  const rosterRef = useRef([]);
   const { view, botLog, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
     useTableSession();
 
@@ -94,6 +101,11 @@ export default function Tournament() {
       numPlayers: Number(lobby.opponents) + 1,
       startingStack: Number(lobby.startingStack),
     };
+    const heroName = lobby.heroName.trim() || "Hero";
+    const botNames = pickRandomNames(cfg.numPlayers - 1);
+    rosterRef.current = Array.from({ length: cfg.numPlayers }, (_, seat) =>
+      seat === HERO_SEAT ? heroName : botNames.shift(),
+    );
     setConfig(cfg);
     nextButtonRef.current = null;
     dealHand(cfg, null, createLevelTracker());
@@ -124,6 +136,13 @@ export default function Tournament() {
 
   const roles = view ? seatRoles(view.players.length, buttonSeat) : null;
   const heroStack = view?.players.find((p) => p.seat === HERO_SEAT)?.stack;
+
+  // Igual que en Sit&Go: misma vista, con el nombre persistente del roster
+  // añadido a cada jugador (aquí el asiento nunca cambia de significado, así
+  // que no hace falta tocar la posición, solo el nombre).
+  const displayView = view
+    ? { ...view, players: view.players.map((p) => ({ ...p, name: rosterRef.current[p.seat] ?? p.name })) }
+    : view;
 
   return (
     <div data-testid={TOURNAMENT.screen} className="mx-auto max-w-[1400px] px-6 py-4">
@@ -174,6 +193,19 @@ export default function Tournament() {
             </span>{" "}
             (Nivel 1) — suben solas cada vez que el botón completa una vuelta a la mesa.
           </div>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-[#475569]">¿Cómo te llamas?</span>
+            <input
+              type="text"
+              data-testid={TOURNAMENT.heroNameInput}
+              placeholder="Hero"
+              maxLength={20}
+              value={lobby.heroName}
+              onChange={(e) => setLobby((l) => ({ ...l, heroName: e.target.value }))}
+              className={fieldClass}
+            />
+          </label>
 
           <label className="flex flex-col gap-1.5">
             <span className="text-[10px] uppercase tracking-widest text-[#475569]">Rivales (2-8)</span>
@@ -247,7 +279,7 @@ export default function Tournament() {
       {phase === "playing" && view && (
         <div className="mt-2">
           <HandTable
-            view={view}
+            view={displayView}
             roles={roles}
             botLog={botLog}
             onAction={applyAction}

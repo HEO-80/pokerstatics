@@ -226,3 +226,23 @@ El paso 4 es la mesa visual — y aquí cambia el tipo de trabajo: dejamos el ba
 Este es un momento perfecto para commit antes de meternos con el frontend, porque el backend queda cerrado y estable. Un mensaje sencillo:
 
 feat(backend): API de mesa jugable con estado en memoria
+
+Y hago balance, porque el Sit & Go está prácticamente cerrado a nivel funcional. Repasando tu lista de cosas pendientes, quedaban:
+
+
+✅ Paso 1 — Motor de una mano (side-pots)
+✅ Paso 2 — IA de los bots
+✅ Paso 3 — Endpoint de la mesa (jugable por API, cartas ocultas) ← recién hecho
+⬜ Paso 4 — Mesa visual ← siguiente
+⬜ Paso 5 — El coach
+⬜ Paso 6 — Puntos y niveles
+
+✅ Ciegas que suben — hecho ahora
+⬜ Asientos fijos (que los jugadores no cambien de sitio al eliminarse) — el bug que detectaste ayer, aún pendiente
+⬜ Nombres random + pedirte tu nombre
+⬜ Separar los asientos de la derecha que se solapan
+⬜ Sonidos + temporizador de turno
+⬜ El coach (la joya, aún sin empezar)
+⬜ la actividad no se tiene que reiniciar asi podemos ver que ha asaduranteo todo el rato quien gano que mano y que hicieron, que ponga tal resuvio tall hizo call tal hizo re raise, el otro all in, tal gagno el bote con tanto.. y cada mano numerada mano 23, oo mano 24 ciga bb tal, ciegga sb tal, este hace call, este hace raise, luego sale el flop, con as ded picas tal y tal.. asi todo
+
+Después de que confirmes las ciegas y hagas el commit, yo iría a por los asientos fijos + nombres + separación de la derecha (los tres van juntos, son "identidad y posición de los jugadores").

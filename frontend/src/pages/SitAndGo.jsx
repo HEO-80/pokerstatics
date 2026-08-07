@@ -6,6 +6,7 @@ import { seatRoles } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { SITANDGO } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker } from "@/lib/blindLevels";
+import { pickRandomNames } from "@/lib/playerNames";
 
 // Sit & Go — ESQUELETO MÍNIMO: siempre 9 asientos (tú + 8 bots) en UNA sola
 // mesa, sin mesas paralelas ni simulación de otros jugadores. El stack de
@@ -19,6 +20,7 @@ const HERO_SEAT = 0;
 const TOTAL_SEATS = 9;
 
 const LOBBY_DEFAULTS = {
+  heroName: "",
   startingStack: 100,
   botProfile: "tag",
 };
@@ -28,15 +30,24 @@ const fieldClass =
 
 const PROFILES = ["nit", "tag", "lag", "station"];
 
-function buildSurvivorHand(players, heroSeat) {
-  const hero = players.find((p) => p.seat === heroSeat);
-  const bots = players.filter((p) => p.seat !== heroSeat && p.stack > 0);
-  const survivors = [hero, ...bots];
+/**
+ * Igual que antes, pero en vez de renumerar 0..k-1 en el orden en que vienen
+ * en `players` (lo que hacía que un superviviente cambiara de posición
+ * visual entre manos, ver PlayTable.jsx), ordena por SLOT persistente
+ * (identidad estable asignada en startSitAndGo, ver aliveSlotsRef más abajo)
+ * — así el hero (slot 0) siempre queda primero igual que antes, pero el
+ * orden relativo de los bots supervivientes es el de su slot de toda la
+ * partida, no el de su asiento en ESTA mano concreta.
+ */
+function buildSurvivorHand(players, aliveSlots) {
+  const alive = players.filter((p) => p.stack > 0);
+  const survivingSlots = alive.map((p) => aliveSlots[p.seat]).sort((a, b) => a - b);
   const stacks = {};
-  survivors.forEach((p, i) => {
-    stacks[String(i)] = p.stack;
+  survivingSlots.forEach((slot, i) => {
+    const player = alive.find((p) => aliveSlots[p.seat] === slot);
+    stacks[String(i)] = player.stack;
   });
-  return { numPlayers: survivors.length, stacks };
+  return { numPlayers: survivingSlots.length, stacks, survivingSlots };
 }
 
 export default function SitAndGo() {
@@ -55,6 +66,16 @@ export default function SitAndGo() {
   // es solo el espejo para pintar el HUD.
   const levelTrackerRef = useRef(createLevelTracker());
   const [levelInfo, setLevelInfo] = useState(createLevelTracker());
+  // Identidad estable de cada jugador: rosterRef[slot] = nombre, fijado UNA
+  // vez al empezar la partida (slot 0 = hero) y nunca reasignado. aliveSlotsRef
+  // es la traducción asiento-de-backend-de-ESTA-mano -> slot persistente
+  // (aliveSlotsRef.current[seatDeEstaManoDelBackend] = slot); se recalcula en
+  // cada nextHand() a partir de quién sigue vivo, pero SIN reordenar a nadie:
+  // ver buildSurvivorHand. PlayTable usa esta traducción (prop `visualSlot`
+  // en cada jugador, ver displayView) para dibujar a cada uno SIEMPRE en el
+  // mismo punto del óvalo, aunque el backend renumere sus asientos.
+  const rosterRef = useRef([]);
+  const aliveSlotsRef = useRef([]);
   const { view, botLog, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
     useTableSession();
 
@@ -102,6 +123,11 @@ export default function SitAndGo() {
 
   const startSitAndGo = (e) => {
     e.preventDefault();
+    const heroName = lobby.heroName.trim() || "Hero";
+    rosterRef.current = [heroName, ...pickRandomNames(TOTAL_SEATS - 1)];
+    // Primera mano: el asiento de backend i ES el slot i (identidad = orden
+    // de reparto inicial).
+    aliveSlotsRef.current = Array.from({ length: TOTAL_SEATS }, (_, i) => i);
     const cfg = {
       startingStack: Number(lobby.startingStack),
       botProfile: lobby.botProfile,
@@ -113,12 +139,13 @@ export default function SitAndGo() {
 
   const nextHand = () => {
     if (!view || !config) return;
-    const { numPlayers, stacks } = buildSurvivorHand(view.players, HERO_SEAT);
+    const { numPlayers, stacks, survivingSlots } = buildSurvivorHand(view.players, aliveSlotsRef.current);
     // El nº de vivos con el que se reparte la mano que viene YA refleja las
     // eliminaciones de la mano que acaba de terminar -> exactamente el
     // "numPlayers actual" que advanceLevelTracker necesita para acortar la
     // vuelta cuando ha caído alguien.
     const tracker = advanceLevelTracker(levelTrackerRef.current, numPlayers);
+    aliveSlotsRef.current = survivingSlots;
     dealHand(config, numPlayers, stacks, tracker);
   };
 
@@ -141,6 +168,23 @@ export default function SitAndGo() {
   // Posición final = nº de asientos que quedaban en la mesa cuando el hero
   // se quedó a 0 (todos ellos terminan igual o peor que el hero en esa mano).
   const finalPosition = view?.players.length;
+
+  // Vista que de verdad se pinta: mismos datos que `view`, pero con el
+  // nombre persistente de cada jugador (roster) y su slot visual estable
+  // (aliveSlots) añadidos a cada jugador — ver PlayTable.jsx (usa
+  // `visualSlot` para la posición) y HandTable/seatName (usa `name` para el
+  // log y el banner de resultado). `seat` NO se toca: badges D/SB/BB, turno
+  // actual, testids y el log de acciones lo siguen usando tal cual viene del
+  // backend.
+  const displayView = view
+    ? {
+        ...view,
+        players: view.players.map((p) => {
+          const slot = aliveSlotsRef.current[p.seat] ?? p.seat;
+          return { ...p, visualSlot: slot, name: rosterRef.current[slot] ?? p.name };
+        }),
+      }
+    : view;
 
   return (
     <div data-testid={SITANDGO.screen} className="mx-auto max-w-[1400px] px-6 py-4">
@@ -193,6 +237,19 @@ export default function SitAndGo() {
             </span>{" "}
             (Nivel 1) — suben solas cada vez que el botón completa una vuelta a la mesa.
           </div>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-[#475569]">¿Cómo te llamas?</span>
+            <input
+              type="text"
+              data-testid={SITANDGO.heroNameInput}
+              placeholder="Hero"
+              maxLength={20}
+              value={lobby.heroName}
+              onChange={(e) => setLobby((l) => ({ ...l, heroName: e.target.value }))}
+              className={fieldClass}
+            />
+          </label>
 
           <label className="flex flex-col gap-1.5">
             <span className="text-[10px] uppercase tracking-widest text-[#475569]">Stack inicial</span>
@@ -286,13 +343,14 @@ export default function SitAndGo() {
       {phase === "playing" && view && (
         <div className="mt-2">
           <HandTable
-            view={view}
+            view={displayView}
             roles={roles}
             botLog={botLog}
             onAction={applyAction}
             loading={loading || animating}
             dealing={dealing}
             onSkipDeal={skipDeal}
+            totalSeats={TOTAL_SEATS}
             finishedActions={
               heroBusted ? (
                 <button

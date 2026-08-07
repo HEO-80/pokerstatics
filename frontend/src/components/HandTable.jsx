@@ -124,6 +124,7 @@ export default function HandTable({
   finishedActions,
   dealing = false,
   onSkipDeal,
+  totalSeats,
 }) {
   const [helpOpen, setHelpOpen] = useState(false);
   const potGroups = view.finished ? groupPotResults(view.winners_by_pot) : [];
@@ -185,6 +186,7 @@ export default function HandTable({
               highlightedCards={highlightedCards}
               dealing={dealing}
               onSkipDeal={onSkipDeal}
+              totalSeats={totalSeats}
             />
           </div>
 
