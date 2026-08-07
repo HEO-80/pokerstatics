@@ -62,6 +62,10 @@ export const PLAY = {
   botLog: "play-bot-log",
   errorBanner: "play-error-banner",
   resultBanner: "play-result-banner",
+  seatBetPrefix: "play-seat-bet-",
+  blinds: "play-blinds",
+  helpToggleBtn: "play-help-toggle-btn",
+  helpPanel: "play-help-panel",
 };
 
 export const TOURNAMENT = {

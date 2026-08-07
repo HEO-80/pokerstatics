@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import poker_table_api
 from poker_table_api import table_router
 
 app = FastAPI()
@@ -76,6 +77,8 @@ def test_full_hand_via_api_conserves_chips_and_hides_villain_cards():
 
     assert data["hero_seat"] == 0
     assert data["finished"] or data["current_seat"] == 0
+    assert data["sb"] == 5
+    assert data["bb"] == 10
     _assert_no_villain_cards_leaked(data)
 
     snapshots = _drive_hero_to_completion(hand_id)
@@ -197,6 +200,72 @@ def test_new_hand_can_carry_over_stacks_from_a_previous_hand():
             "las fichas totales no se conservaron (mano 2 terminó sola antes "
             "de que el hero pudiera actuar)"
         )
+
+
+# ---------------------------------------------------------------------------
+# El botón inicial (dealer) debe ser ALEATORIO cuando el caller no lo fija:
+# el bug reportado era que el FRONTEND siempre mandaba un `button` explícito
+# (arrancando en 0, con el hero también en el asiento 0 -> el hero era
+# siempre el dealer). El backend ya elegía uno al azar con random.randint
+# cuando `button` venía ausente (ver new_hand en poker_table_api.py); este
+# test deja esa ruta cubierta: confirma que de verdad se usa random.randint
+# (no un valor fijo camuflado) y que el asiento resultante varía.
+# ---------------------------------------------------------------------------
+def test_new_hand_without_button_picks_a_random_seat(monkeypatch):
+    calls = []
+    real_randint = poker_table_api.random.randint
+
+    def spy_randint(a, b):
+        calls.append((a, b))
+        return real_randint(a, b)
+
+    monkeypatch.setattr(poker_table_api.random, "randint", spy_randint)
+
+    seen_buttons = set()
+    num_players = 6
+    for _ in range(40):
+        resp = client.post("/api/table/new", json={
+            "num_players": num_players,
+            "starting_stack": 200,
+            "sb": 5,
+            "bb": 10,
+            "hero_seat": 0,
+            "bot_profiles": "tag",
+            # "button" se omite a propósito: es la ruta que debe azarizarlo.
+        })
+        assert resp.status_code == 200, resp.text
+        hand_id = resp.json()["hand_id"]
+        button_seat = poker_table_api._STORE.get(hand_id)["hand"].button_seat
+        assert 0 <= button_seat < num_players
+        seen_buttons.add(button_seat)
+
+    assert calls, "random.randint no se invocó: el botón no se está eligiendo al azar"
+    assert all(c == (0, num_players - 1) for c in calls), calls
+    assert len(seen_buttons) > 1, (
+        f"el botón inicial nunca varió de asiento en 40 intentos: {seen_buttons}"
+    )
+
+
+def test_new_hand_button_rotates_when_caller_passes_it_explicitly():
+    """El backend no tiene memoria de sesión: rotar el botón mano a mano es
+    responsabilidad del caller (el frontend), que debe pasar un `button`
+    explícito cada vez. Este test fija el contrato que ese frontend explota:
+    el `button_seat` de la mano creada es siempre exactamente el que se pidió."""
+    num_players = 5
+    for button in range(num_players):
+        resp = client.post("/api/table/new", json={
+            "num_players": num_players,
+            "starting_stack": 200,
+            "sb": 5,
+            "bb": 10,
+            "hero_seat": 0,
+            "button": button,
+            "bot_profiles": "tag",
+        })
+        assert resp.status_code == 200, resp.text
+        hand_id = resp.json()["hand_id"]
+        got = poker_table_api._STORE.get(hand_id)["hand"].button_seat
+        assert got == button, f"pedí button={button} y la mano se creó con button_seat={got}"
 
 
 def test_new_hand_stacks_rejects_out_of_range_seat():

@@ -22,19 +22,31 @@ const DEFAULTS = {
 export default function Practice() {
   const [config, setConfig] = useState(DEFAULTS);
   const [buttonSeat, setButtonSeat] = useState(0);
-  const nextButtonRef = useRef(0);
-  const { view, botLog, loading, animating, error, reset, dealAnimated, actionAnimated } = useTableSession();
+  // null = todavía no se ha repartido ninguna mano -> elegir un botón al azar
+  // en vez del hardcode a 0 (que con hero_seat también en 0 por defecto hacía
+  // que el hero fuera siempre el dealer inicial). Rota normalmente después.
+  const nextButtonRef = useRef(null);
+  const { view, botLog, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
+    useTableSession();
 
   const startHand = useCallback(
     async (formConfig) => {
       const cfg = formConfig || config;
       setConfig(cfg);
-      const button = nextButtonRef.current % cfg.numPlayers;
+      const button =
+        nextButtonRef.current === null
+          ? Math.floor(Math.random() * cfg.numPlayers)
+          : nextButtonRef.current % cfg.numPlayers;
       nextButtonRef.current = button + 1;
+      // Fijar el botón ANTES de repartir (no después): el reparto animado y
+      // las insignias D/SB/BB usan este estado mientras la mano se está
+      // repartiendo, así que fijarlo tras resolver dejaba la animación
+      // mostrando el botón de la mano ANTERIOR durante todo el reparto.
+      setButtonSeat(button);
       const stacksBySeat = {};
       for (let s = 0; s < cfg.numPlayers; s++) stacksBySeat[s] = cfg.startingStack;
 
-      const data = await dealAnimated(
+      await dealAnimated(
         () =>
           createTableHand({
             num_players: cfg.numPlayers,
@@ -47,7 +59,6 @@ export default function Practice() {
           }),
         { heroSeat: cfg.heroSeat, buttonSeat: button, stacksBySeat, sb: cfg.sb, bb: cfg.bb },
       );
-      if (data) setButtonSeat(button);
     },
     [config, dealAnimated],
   );
@@ -100,6 +111,8 @@ export default function Practice() {
           botLog={botLog}
           onAction={applyAction}
           loading={loading || animating}
+          dealing={dealing}
+          onSkipDeal={skipDeal}
           finishedActions={
             <button
               data-testid={PLAY.nextHandBtn}

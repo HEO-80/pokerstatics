@@ -46,20 +46,43 @@
   border: 1px solid rgba(15, 17, 21, 0.15);
 }
 
+/* Reverso de carta: mismo lenguaje visual que el resto de la app (fondo
+   oscuro + acento azul/violeta del logo) en vez del clásico fieltro/madera —
+   marco interior fino (::before, con una trama de rombos muy sutil) y un
+   emblema de pica centrado con el degradado de marca (::after). */
 .playing-card-back {
   background: linear-gradient(135deg, #1E293B 0%, #0F1115 100%);
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.7);
+  overflow: hidden;
+}
+
+.playing-card-back::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 5px;
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  background-image:
+    repeating-linear-gradient(45deg, rgba(96, 165, 250, 0.09) 0 1px, transparent 1px 9px),
+    repeating-linear-gradient(-45deg, rgba(139, 92, 246, 0.09) 0 1px, transparent 1px 9px);
 }
 
 .playing-card-back::after {
-  content: "";
+  content: "♠";
   position: absolute;
-  inset: 6px;
-  border-radius: 4px;
-  background:
-    repeating-linear-gradient(45deg, rgba(59, 130, 246, 0.12) 0 4px, transparent 4px 8px);
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6em;
+  line-height: 1;
+  background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.4));
 }
 
 /* Focus ring */

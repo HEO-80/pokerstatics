@@ -97,7 +97,18 @@ def test_heads_up_showdown_aa_beats_kk():
 
     assert hand.is_complete
     assert hand.board == NEUTRAL_BOARD + [NEUTRAL_TURN, NEUTRAL_RIVER]
-    assert hand.winners_by_pot == [{"amount": 20, "winners": [0], "share": 20}]
+
+    result = hand.winners_by_pot[0]
+    assert result["amount"] == 20
+    assert result["winners"] == [0]
+    assert result["share"] == 20
+    assert result["payouts"] == {0: 20}
+    assert result["hand_name"] == "Pareja"
+    assert set(result["winning_hands"][0]) == {
+        make_card("A", "s"), make_card("A", "h"),
+        make_card("9", "h"), make_card("7", "d"), make_card("4", "c"),
+    }
+
     assert hand.players[0].stack == 1000 - 10 + 20  # pagó 10 en total, gana el bote de 20
     assert hand.players[1].stack == 1000 - 10
 
@@ -145,13 +156,88 @@ def test_side_pot_short_stack_wins_main_pot_only():
     assert hand.is_complete
     assert hand.board == NEUTRAL_BOARD + [NEUTRAL_TURN, NEUTRAL_RIVER]
 
-    assert hand.winners_by_pot == [
-        {"amount": 300, "winners": [0], "share": 300},   # bote principal: AA se lo lleva
-        {"amount": 800, "winners": [1], "share": 800},   # bote lateral: KK > QQ
-    ]
+    main_pot, side_pot = hand.winners_by_pot
+
+    assert main_pot["amount"] == 300
+    assert main_pot["winners"] == [0]         # bote principal: AA se lo lleva
+    assert main_pot["share"] == 300
+    assert main_pot["payouts"] == {0: 300}
+    assert main_pot["hand_name"] == "Pareja"
+    assert set(main_pot["winning_hands"][0]) == {
+        make_card("A", "s"), make_card("A", "h"),
+        make_card("9", "h"), make_card("7", "d"), make_card("4", "c"),
+    }
+
+    assert side_pot["amount"] == 800
+    assert side_pot["winners"] == [1]         # bote lateral: KK > QQ
+    assert side_pot["share"] == 800
+    assert side_pot["payouts"] == {1: 800}
+    assert side_pot["hand_name"] == "Pareja"
+    assert set(side_pot["winning_hands"][1]) == {
+        make_card("K", "s"), make_card("K", "h"),
+        make_card("9", "h"), make_card("7", "d"), make_card("4", "c"),
+    }
+
     assert hand.players[0].stack == 300
     assert hand.players[1].stack == 800
     assert hand.players[2].stack == 0
 
     # Las fichas se conservan: 100 + 500 + 500 == 300 + 800 + 0
     assert sum(p.stack for p in hand.players.values()) == 1100
+
+
+# ---------------------------------------------------------------------------
+# d) EMPATE: board emparejado donde ninguna mano mejora más allá de él
+#    ("board plays") -> ambos jugadores empatan la misma categoría y se
+#    reparten el bote a partes iguales, cada uno con sus propias cartas
+#    ganadoras (mismos rangos, distinto palo en el kicker).
+# ---------------------------------------------------------------------------
+def test_showdown_tie_splits_pot_evenly_with_matching_categories():
+    players = _players((0, "Hero", 200), (1, "Villain", 200))
+
+    board_9s_pair = [
+        make_card("9", "d"), make_card("9", "h"), make_card("K", "c"),
+    ]
+    turn_7s = make_card("7", "s")
+    river_2c = make_card("2", "c")
+
+    known = [
+        make_card("3", "h"), make_card("3", "d"),   # 1ª vuelta: hero, villain
+        make_card("4", "h"), make_card("4", "d"),   # 2ª vuelta
+        BURN1, *board_9s_pair,
+        BURN2, turn_7s,
+        BURN3, river_2c,
+    ]
+    deck = deck_with_known_cards(known)
+    hand = Hand(players, button_seat=0, sb=5, bb=10, deck=deck)
+
+    # Heads-up: SB (seat0, botón) iguala; BB (seat1) pasa; luego se pasa
+    # entero hasta el showdown (nadie mejora respecto al board).
+    assert hand.current_seat == 0
+    hand.apply_action(0, "call")
+    hand.apply_action(1, "check")
+    for _ in range(3):  # flop, turn, river
+        hand.apply_action(1, "check")
+        hand.apply_action(0, "check")
+
+    assert hand.is_complete
+    assert hand.board == board_9s_pair + [turn_7s, river_2c]
+
+    result = hand.winners_by_pot[0]
+    assert result["amount"] == 20
+    assert sorted(result["winners"]) == [0, 1]
+    assert result["share"] == 10
+    assert result["payouts"] == {0: 10, 1: 10}
+    assert result["hand_name"] == "Pareja"
+    assert set(result["winning_hands"][0]) == {
+        make_card("9", "d"), make_card("9", "h"), make_card("K", "c"),
+        make_card("7", "s"), make_card("4", "h"),
+    }
+    assert set(result["winning_hands"][1]) == {
+        make_card("9", "d"), make_card("9", "h"), make_card("K", "c"),
+        make_card("7", "s"), make_card("4", "d"),
+    }
+
+    # Empate exacto: ambos recuperan justo lo que pusieron (10 cada uno).
+    assert hand.players[0].stack == 200
+    assert hand.players[1].stack == 200

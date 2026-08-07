@@ -209,6 +209,8 @@ def _hero_view(hand: Hand, hero_seat: int) -> dict:
         "board": [card_str(c) for c in hand.board],
         "pot_total": hand.pot_total(),
         "current_bet": hand.current_bet,
+        "sb": hand.sb,
+        "bb": hand.bb,
         "current_seat": hand.current_seat,
         "hero_seat": hero_seat,
         "is_hero_turn": (not hand.is_complete) and hand.current_seat == hero_seat,
@@ -216,8 +218,19 @@ def _hero_view(hand: Hand, hero_seat: int) -> dict:
         "legal_actions": hand.legal_actions(hero_seat) if not hand.is_complete else {},
         "players": players,
         "winners_by_pot": (
-            [{"amount": w["amount"], "winners": w["winners"], "share": w["share"]}
-             for w in hand.winners_by_pot] if hand.is_complete else []
+            [
+                {
+                    "amount": w["amount"],
+                    "winners": w["winners"],
+                    "share": w["share"],
+                    "payouts": w["payouts"],
+                    "hand_name": w["hand_name"],
+                    "winning_cards": {
+                        seat: [card_str(c) for c in cards] for seat, cards in w["winning_hands"].items()
+                    },
+                }
+                for w in hand.winners_by_pot
+            ] if hand.is_complete else []
         ),
     }
 

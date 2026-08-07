@@ -79,6 +79,37 @@ export function buildInitialFrame(players, buttonSeat, stacksBySeat, sb, bb) {
 }
 
 /**
+ * Cuenta subidas por calle en TODA la mano (hero + bots, en orden
+ * cronológico real) para poder etiquetar "sube a" (1ª subida de la ronda) /
+ * "3-bet" (2ª) / "4-bet" (3ª) / etc. en el log de Actividad. Vive fuera de
+ * animateHandUpdate porque debe persistir ENTRE llamadas: cada turno del
+ * hero dispara una llamada nueva, pero la misma calle puede seguir abierta
+ * con más subidas de por medio (open del bot -> 3-bet del hero -> 4-bet de
+ * otro bot, repartido en dos tandas de bot_actions). El caller
+ * (useTableSession) guarda uno por mano y lo resetea al repartir una mano
+ * nueva.
+ */
+export function createRaiseTracker() {
+  return { street: null, count: 0 };
+}
+
+/** Avanza `tracker` con una entrada del log (mutación in-place) y devuelve
+ * el número de subida (1 = open, 2 = 3-bet, 3 = 4-bet...) si `entry` es una
+ * subida, o `null` si no lo es. Debe llamarse con TODAS las entradas en
+ * orden cronológico real — incluida la del hero, aunque esa no se muestre en
+ * el log de Actividad — para que el conteo no se salte sus subidas y
+ * etiquete mal las de los bots que vienen después en la misma calle. */
+export function nextRaiseNumber(tracker, entry) {
+  if (entry.street !== tracker.street) {
+    tracker.street = entry.street;
+    tracker.count = 0;
+  }
+  if (entry.action !== "raise") return null;
+  tracker.count += 1;
+  return tracker.count;
+}
+
+/**
  * Reproduce la secuencia [heroEntry?, ...data.bot_actions] paso a paso.
  *
  * - baseView: { street, hero_seat, players } — el estado justo ANTES de esta
@@ -97,6 +128,7 @@ export async function animateHandUpdate({
   heroEntry = null,
   onFrame,
   onLogAppend,
+  raiseTracker = createRaiseTracker(),
   delayMs = 750,
 }) {
   const botEntries = data.bot_actions || [];
@@ -105,10 +137,26 @@ export async function animateHandUpdate({
 
   let working = baseView.players.map((p) => ({ ...p }));
   let visibleBoardLen = boardLenForStreet(baseView.street);
+  let workingStreet = baseView.street;
 
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
     const isHeroStep = i === 0 && !!heroEntry;
+
+    // Un mismo lote de bot_actions puede cruzar de calle (p.ej. el hero se
+    // retiró y el resto de la mano se auto-resuelve de una sola vez): sin
+    // este reset, las fichas de apuesta de la calle anterior seguirían
+    // visibles delante de asientos que aún no han actuado en la nueva calle.
+    if (entry.street !== workingStreet) {
+      working = working.map((p) => ({ ...p, street_bet: 0 }));
+      workingStreet = entry.street;
+    }
+
+    // Avanza el contador de subidas con TODAS las entradas (incluida la del
+    // hero) para que la numeración 3-bet/4-bet de los bots no se desincronice
+    // cuando el hero resubió entre medias — aunque su propia entrada no se
+    // publique en el log de Actividad.
+    const raiseNumber = nextRaiseNumber(raiseTracker, entry);
 
     working = applyLogEntryToPlayers(working, entry);
     visibleBoardLen = Math.max(visibleBoardLen, boardLenForStreet(entry.street));
@@ -129,7 +177,7 @@ export async function animateHandUpdate({
       actionBubble: { seat: entry.seat, action: entry.action, amount: entry.amount, total: entry.total },
     });
 
-    if (!isHeroStep) onLogAppend(entry);
+    if (!isHeroStep) onLogAppend(raiseNumber != null ? { ...entry, raiseNumber } : entry);
 
     const isLast = i === entries.length - 1;
     const delay = isHeroStep ? 300 : isLast ? Math.min(delayMs, 500) : delayMs;

@@ -45,13 +45,30 @@ export default function SitAndGo() {
   const [lobby, setLobby] = useState(LOBBY_DEFAULTS);
   const [config, setConfig] = useState(null);
   const [buttonSeat, setButtonSeat] = useState(0);
-  const nextButtonRef = useRef(0);
-  const { view, botLog, loading, animating, error, reset, dealAnimated, actionAnimated } = useTableSession();
+  // null = "todavía no se ha jugado ninguna mano de esta partida" -> el
+  // próximo dealHand() debe elegir un botón al azar (en vez del hardcode a 0
+  // que hacía que el hero, sentado siempre en el asiento 0, fuera SIEMPRE el
+  // dealer inicial). Una vez hay un valor, rota normalmente (+1 por mano).
+  const nextButtonRef = useRef(null);
+  const { view, botLog, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
+    useTableSession();
 
   const dealHand = useCallback(
     async (cfg, numPlayers, stacksBySeat) => {
-      const button = nextButtonRef.current % numPlayers;
+      const button =
+        nextButtonRef.current === null
+          ? Math.floor(Math.random() * numPlayers)
+          : nextButtonRef.current % numPlayers;
       nextButtonRef.current = button + 1;
+      // Fijar el botón y pasar a "playing" ANTES de llamar a dealAnimated (no
+      // después, como estaba): dealAnimated no resuelve hasta que termina TODO
+      // el reparto animado + la reproducción de las acciones de los bots, así
+      // que si se esperaba a que resolviera para mostrar la mesa, esa
+      // animación entera ocurría "a ciegas" con el lobby todavía en pantalla
+      // (de ahí que la primera mano no se viera repartir y que la app
+      // pareciera congelada un rato tras pulsar "Empezar").
+      setButtonSeat(button);
+      setPhase("playing");
       const stacks = stacksBySeat || Object.fromEntries(
         Array.from({ length: numPlayers }, (_, s) => [s, cfg.startingStack]),
       );
@@ -70,10 +87,7 @@ export default function SitAndGo() {
         { heroSeat: HERO_SEAT, buttonSeat: button, stacksBySeat: stacks, sb: cfg.sb, bb: cfg.bb },
         () => setPhase("lobby"),
       );
-      if (data) {
-        setButtonSeat(button);
-        setPhase("playing");
-      }
+      if (!data) setPhase("lobby");
     },
     [dealAnimated],
   );
@@ -87,7 +101,7 @@ export default function SitAndGo() {
       botProfile: lobby.botProfile,
     };
     setConfig(cfg);
-    nextButtonRef.current = 0;
+    nextButtonRef.current = null;
     dealHand(cfg, TOTAL_SEATS);
   };
 
@@ -123,7 +137,7 @@ export default function SitAndGo() {
         <h1 className="font-display font-bold text-2xl uppercase tracking-tight text-white">
           Sit &amp; Go
         </h1>
-        {phase === "playing" && (
+        {phase === "playing" && view && (
           <div className="flex items-center gap-4">
             <div className="text-xs text-[#475569] font-mono-poker">
               Quedan <span className="text-white font-bold">{survivorsLeft}</span>/{TOTAL_SEATS} · Tu
@@ -218,6 +232,12 @@ export default function SitAndGo() {
         </div>
       )}
 
+      {phase === "playing" && !view && (
+        <div className="mt-10 text-center text-[#94A3B8] font-display uppercase tracking-wider">
+          Repartiendo…
+        </div>
+      )}
+
       {phase === "busted" && (
         <div
           data-testid={SITANDGO.bustedScreen}
@@ -266,6 +286,8 @@ export default function SitAndGo() {
             botLog={botLog}
             onAction={applyAction}
             loading={loading || animating}
+            dealing={dealing}
+            onSkipDeal={skipDeal}
             finishedActions={
               heroBusted ? (
                 <button

@@ -29,13 +29,30 @@ export default function Tournament() {
   const [lobby, setLobby] = useState(LOBBY_DEFAULTS);
   const [config, setConfig] = useState(null);
   const [buttonSeat, setButtonSeat] = useState(0);
-  const nextButtonRef = useRef(0);
-  const { view, botLog, loading, animating, error, reset, dealAnimated, actionAnimated } = useTableSession();
+  // null = "todavía no se ha jugado ninguna mano de esta partida" -> el
+  // próximo dealHand() debe elegir un botón al azar (en vez del hardcode a 0
+  // que hacía que el hero, sentado siempre en el asiento 0, fuera SIEMPRE el
+  // dealer inicial). Una vez hay un valor, rota normalmente (+1 por mano).
+  const nextButtonRef = useRef(null);
+  const { view, botLog, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
+    useTableSession();
 
   const dealHand = useCallback(
     async (cfg, stacksBySeat) => {
-      const button = nextButtonRef.current % cfg.numPlayers;
+      const button =
+        nextButtonRef.current === null
+          ? Math.floor(Math.random() * cfg.numPlayers)
+          : nextButtonRef.current % cfg.numPlayers;
       nextButtonRef.current = button + 1;
+      // Fijar el botón y pasar a "playing" ANTES de llamar a dealAnimated (no
+      // después, como estaba): dealAnimated no resuelve hasta que termina TODO
+      // el reparto animado + la reproducción de las acciones de los bots, así
+      // que si se esperaba a que resolviera para mostrar la mesa, esa
+      // animación entera ocurría "a ciegas" con el lobby todavía en pantalla
+      // (de ahí que la primera mano no se viera repartir y que la app
+      // pareciera congelada un rato tras pulsar "Empezar").
+      setButtonSeat(button);
+      setPhase("playing");
       const stacks = stacksBySeat || Object.fromEntries(
         Array.from({ length: cfg.numPlayers }, (_, s) => [s, cfg.startingStack]),
       );
@@ -54,10 +71,7 @@ export default function Tournament() {
         { heroSeat: HERO_SEAT, buttonSeat: button, stacksBySeat: stacks, sb: cfg.sb, bb: cfg.bb },
         () => setPhase("lobby"),
       );
-      if (data) {
-        setButtonSeat(button);
-        setPhase("playing");
-      }
+      if (!data) setPhase("lobby");
     },
     [dealAnimated],
   );
@@ -71,7 +85,7 @@ export default function Tournament() {
       bb: Number(lobby.bb),
     };
     setConfig(cfg);
-    nextButtonRef.current = 0;
+    nextButtonRef.current = null;
     dealHand(cfg);
   };
 
@@ -104,7 +118,7 @@ export default function Tournament() {
         <h1 className="font-display font-bold text-2xl uppercase tracking-tight text-white">
           Torneo
         </h1>
-        {phase === "playing" && (
+        {phase === "playing" && view && (
           <div className="flex items-center gap-4">
             <div className="text-xs text-[#475569] font-mono-poker">
               Tu stack: <span className="text-white font-bold">{heroStack}</span>
@@ -193,6 +207,12 @@ export default function Tournament() {
         </div>
       )}
 
+      {phase === "playing" && !view && (
+        <div className="mt-10 text-center text-[#94A3B8] font-display uppercase tracking-wider">
+          Repartiendo…
+        </div>
+      )}
+
       {phase === "eliminated" && (
         <div
           data-testid={TOURNAMENT.eliminatedScreen}
@@ -221,6 +241,8 @@ export default function Tournament() {
             botLog={botLog}
             onAction={applyAction}
             loading={loading || animating}
+            dealing={dealing}
+            onSkipDeal={skipDeal}
             finishedActions={
               heroStack > 0 ? (
                 <button

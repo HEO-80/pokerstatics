@@ -1,24 +1,56 @@
-import PlayingCard from "./PlayingCard";
+import { Fragment } from "react";
+import PlayingCard, { RevealCard } from "./PlayingCard";
+import DealOverlay from "./DealOverlay";
+import ChipPile from "./ChipPile";
 import { PLAY } from "@/constants/testIds";
 
 /**
  * Oval table for the live-play mode (2-9 seats). Seats are placed by angle
  * around an ellipse — NOT a row. offset=0 (hero) sits at the bottom-center;
- * offsets increase clockwise from there. Coordinates are percentages of the
- * PARENT box, so the parent's actual width/height (set by the caller via
- * flex, not aspect-ratio) determines how "oval" it visually looks.
+ * offsets increase CLOCKWISE from there (poker action moves to each
+ * player's left, i.e. the seat with offset+1 must appear at the position a
+ * clock-hand would reach next going clockwise from the hero's).
+ *
+ * On screen (x right, y down), sweeping clockwise from the bottom (6
+ * o'clock) goes towards 7-8 o'clock first — i.e. x DECREASES — not towards
+ * 4-5 o'clock (x increasing). `-Math.sin(angle)` gives that direction; using
+ * plain `+Math.sin(angle)` here previously made the action visually run
+ * counter-clockwise (the reported bug) even though poker_table.py's turn
+ * order (ascending seat number from the button) was already correct.
  */
 function seatPoint(offset, numPlayers, radiusX, radiusY) {
-  const angle = (offset * 2 * Math.PI) / numPlayers; // 0 = bottom, increases clockwise
-  const x = 50 + radiusX * Math.sin(angle);
+  const angle = (offset * 2 * Math.PI) / numPlayers; // 0 = bottom
+  const x = 50 - radiusX * Math.sin(angle);
   const y = 50 + radiusY * Math.cos(angle);
   return { x, y };
+}
+
+/** Punto a mitad de camino entre el asiento y el centro de la mesa, donde se
+ * dibuja la ficha de apuesta de ese jugador (siempre entre su asiento y el
+ * bote, nunca encima de ninguno de los dos). */
+function betPoint(seat, fraction = 0.4) {
+  return { x: seat.x + (50 - seat.x) * fraction, y: seat.y + (50 - seat.y) * fraction };
 }
 
 function parseCard(str) {
   if (!str || str.length < 2) return null;
   return { rank: str[0], suit: str[1] };
 }
+
+/**
+ * "winning" (resaltada), "dimmed" (atenuada) o "normal" (sin efecto, cuando
+ * la mano sigue en curso o fue un fold-out sin cartas que comparar).
+ */
+function cardVisualState(cardStr, highlightedCards, finished) {
+  if (!finished || !highlightedCards || highlightedCards.size === 0) return "normal";
+  return highlightedCards.has(cardStr) ? "winning" : "dimmed";
+}
+
+const CARD_STATE_CLASS = {
+  winning: "rounded-lg ring-2 ring-[#F59E0B] shadow-[0_0_14px_rgba(245,158,11,0.75)]",
+  dimmed: "opacity-25",
+  normal: "",
+};
 
 function actionBubbleLabel(bubble) {
   if (!bubble) return null;
@@ -46,6 +78,23 @@ const BADGE_META = {
   bb: { label: "BB", className: "bg-[#F59E0B] text-black" },
 };
 
+/** Pila de fichas (por denominación, ver ChipPile) + importe de la apuesta
+ * de UN jugador en la calle actual, colocada entre su asiento y el centro de
+ * la mesa para que quede claro de quién es. Antes era un disco plano único;
+ * ahora reutiliza la misma descomposición por denominación que la pila de
+ * stack de cada jugador, así el TAMAÑO/COLOR de la apuesta ya transmite algo
+ * de su magnitud antes de leer el número. */
+function BetChip({ amount }) {
+  return (
+    <div className="flex flex-col items-center gap-1 pointer-events-none">
+      <ChipPile amount={amount} chipSize={11} maxColumns={3} gap={1.5} />
+      <div className="px-1.5 py-0.5 rounded-full bg-black/80 border border-white/20 text-[10px] font-mono-poker font-bold text-white leading-none whitespace-nowrap shadow-lg">
+        {amount}
+      </div>
+    </div>
+  );
+}
+
 export default function PlayTable({
   players,
   board,
@@ -57,10 +106,17 @@ export default function PlayTable({
   bbSeat,
   finished,
   actionBubble,
+  highlightedCards,
+  dealing = false,
+  onSkipDeal,
 }) {
   const numPlayers = players.length;
   const heroIndex = players.findIndex((p) => p.seat === heroSeat);
   const bubbleLabel = actionBubbleLabel(actionBubble);
+  const seatPositions = players.map((p, i) => ({
+    seat: p.seat,
+    ...seatPoint((i - heroIndex + numPlayers) % numPlayers, numPlayers, 43, 38),
+  }));
 
   return (
     <div className="relative h-full w-full" data-testid={PLAY.table}>
@@ -86,7 +142,12 @@ export default function PlayTable({
             {board && board.length > 0 ? (
               board.map((c, i) => {
                 const card = parseCard(c);
-                return <PlayingCard key={i} rank={card.rank} suit={card.suit} size="sm" />;
+                const state = cardVisualState(c, highlightedCards, finished);
+                return (
+                  <div key={i} className={CARD_STATE_CLASS[state]}>
+                    <RevealCard rank={card.rank} suit={card.suit} size="sm" entrance />
+                  </div>
+                );
               })
             ) : (
               <div className="text-[10px] uppercase tracking-widest text-[#475569]">Preflop</div>
@@ -99,8 +160,8 @@ export default function PlayTable({
 
         {/* Seats */}
         {players.map((p, i) => {
-          const offset = (i - heroIndex + numPlayers) % numPlayers;
-          const { x, y } = seatPoint(offset, numPlayers, 43, 38);
+          const seat = seatPositions[i];
+          const { x, y } = seat;
           const isHero = p.seat === heroSeat;
           const isTurn = !finished && p.seat === currentSeat;
           const isFolded = p.status === "folded";
@@ -112,87 +173,128 @@ export default function PlayTable({
           else if (p.seat === bbSeat) badge = BADGE_META.bb;
 
           const showBubble = actionBubble && actionBubble.seat === p.seat && bubbleLabel;
+          const showBetChip = p.street_bet > 0 && !isFolded;
+          const chipPt = showBetChip ? betPoint(seat) : null;
+
+          // La pila de fichas del stack total se cuelga del mismo contenedor
+          // flex-col del asiento (cartas encima, caja de nombre/stack debajo)
+          // para heredar gratis el opacity-35 al retirarse y no necesitar
+          // coordenadas propias. Para no invadir NUNCA el centro/board, crece
+          // hacia el lado contrario al centro de la mesa: en la mitad
+          // superior del óvalo (seat.y < 50, los asientos opuestos al hero)
+          // eso es ANTES de las cartas (empuja todo hacia arriba, lejos del
+          // 50%); en la mitad inferior (el lado del hero) es DESPUÉS de la
+          // caja de nombre (empuja hacia abajo, también lejos del 50%).
+          const growsUp = seat.y < 50;
+          const stackPile =
+            p.stack > 0 ? (
+              <ChipPile
+                amount={p.stack}
+                chipSize={10}
+                maxColumns={3}
+                gap={1.5}
+                className={growsUp ? "mb-1" : "mt-1"}
+              />
+            ) : null;
 
           return (
-            <div
-              key={p.seat}
-              data-testid={`${PLAY.seatPrefix}${p.seat}`}
-              className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center transition-opacity ${
-                isFolded ? "opacity-35" : ""
-              }`}
-              style={{ left: `${x}%`, top: `${y}%` }}
-            >
-              {showBubble && (
+            <Fragment key={p.seat}>
+              <div
+                data-testid={`${PLAY.seatPrefix}${p.seat}`}
+                className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center transition-opacity ${
+                  isFolded ? "opacity-35" : ""
+                }`}
+                style={{ left: `${x}%`, top: `${y}%` }}
+              >
+                {showBubble && (
+                  <div
+                    key={`${actionBubble.seat}-${actionBubble.action}-${actionBubble.total ?? actionBubble.amount ?? ""}`}
+                    className="absolute -top-6 z-10 animate-in fade-in zoom-in-95 duration-200 px-2 py-0.5 rounded-full bg-white text-black text-[10px] font-display font-bold uppercase tracking-wide whitespace-nowrap shadow-lg"
+                  >
+                    {bubbleLabel}
+                  </div>
+                )}
+                {growsUp && stackPile}
+                <div className="flex gap-0.5 mb-1 items-end">
+                  {!isFolded && p.hole_cards ? (
+                    p.hole_cards.map((c, idx) => {
+                      const card = parseCard(c);
+                      const state = cardVisualState(c, highlightedCards, finished);
+                      const cardSize = isHero ? "md" : "sm";
+                      const slotDims = isHero ? "w-16 h-24" : "w-12 h-16";
+                      return (
+                        <div key={idx} className={`${slotDims} ${CARD_STATE_CLASS[state]}`}>
+                          {dealing ? null : isHero ? (
+                            <RevealCard rank={card.rank} suit={card.suit} size={cardSize} />
+                          ) : (
+                            <PlayingCard rank={card.rank} suit={card.suit} size={cardSize} />
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : !isFolded ? (
+                    <>
+                      <div className="w-12 h-16">{!dealing && <PlayingCard faceDown size="sm" />}</div>
+                      <div className="w-12 h-16">{!dealing && <PlayingCard faceDown size="sm" />}</div>
+                    </>
+                  ) : null}
+                </div>
+
                 <div
-                  key={`${actionBubble.seat}-${actionBubble.action}-${actionBubble.total ?? actionBubble.amount ?? ""}`}
-                  className="absolute -top-6 z-10 animate-in fade-in zoom-in-95 duration-200 px-2 py-0.5 rounded-full bg-white text-black text-[10px] font-display font-bold uppercase tracking-wide whitespace-nowrap shadow-lg"
+                  className={`relative min-w-[70px] max-w-[92px] px-2 py-1 rounded-md flex flex-col items-center border-2 leading-tight transition-colors ${
+                    isTurn
+                      ? "bg-[#10B981]/20 border-[#10B981] glow-correct"
+                      : isHero
+                        ? "bg-[#0F1115] border-[#3B82F6]"
+                        : "bg-[#0F1115] border-white/12"
+                  }`}
                 >
-                  {bubbleLabel}
+                  {badge && (
+                    <div
+                      className={`absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${badge.className}`}
+                    >
+                      {badge.label}
+                    </div>
+                  )}
+                  <div className="font-display font-bold text-[10px] uppercase tracking-wide text-white truncate max-w-[84px]">
+                    {p.name}
+                  </div>
+                  <div className="font-mono-poker text-xs text-white">{p.stack}</div>
+                  {isAllIn && (
+                    <div className="text-[8px] uppercase tracking-widest text-[#8B5CF6] font-bold">
+                      All-in
+                    </div>
+                  )}
+                  {isFolded && (
+                    <div className="text-[8px] uppercase tracking-widest text-[#475569] font-bold">
+                      Fold
+                    </div>
+                  )}
+                </div>
+                {!growsUp && stackPile}
+              </div>
+
+              {showBetChip && (
+                <div
+                  data-testid={`${PLAY.seatBetPrefix}${p.seat}`}
+                  className="absolute -translate-x-1/2 -translate-y-1/2 z-[5]"
+                  style={{ left: `${chipPt.x}%`, top: `${chipPt.y}%` }}
+                >
+                  <BetChip amount={p.street_bet} />
                 </div>
               )}
-              <div className="flex gap-0.5 mb-0.5 h-10 md:h-14 items-center">
-                {!isFolded && p.hole_cards ? (
-                  p.hole_cards.map((c, idx) => {
-                    const card = parseCard(c);
-                    return (
-                      <PlayingCard
-                        key={idx}
-                        rank={card.rank}
-                        suit={card.suit}
-                        size={isHero ? "md" : "sm"}
-                      />
-                    );
-                  })
-                ) : !isFolded ? (
-                  <>
-                    <PlayingCard faceDown size="sm" />
-                    <PlayingCard faceDown size="sm" />
-                  </>
-                ) : null}
-              </div>
-
-              <div
-                className={`relative min-w-[70px] max-w-[92px] px-2 py-1 rounded-md flex flex-col items-center border-2 leading-tight transition-colors ${
-                  isTurn
-                    ? "bg-[#10B981]/20 border-[#10B981] glow-correct"
-                    : isHero
-                      ? "bg-[#0F1115] border-[#3B82F6]"
-                      : "bg-[#0F1115] border-white/12"
-                }`}
-              >
-                {badge && (
-                  <div
-                    className={`absolute -top-2 -right-2 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${badge.className}`}
-                  >
-                    {badge.label}
-                  </div>
-                )}
-                <div className="font-display font-bold text-[10px] uppercase tracking-wide text-white truncate max-w-[84px]">
-                  {p.name}
-                </div>
-                <div className="font-mono-poker text-xs text-white">{p.stack}</div>
-                {isAllIn && (
-                  <div className="text-[8px] uppercase tracking-widest text-[#8B5CF6] font-bold">
-                    All-in
-                  </div>
-                )}
-                {isFolded && (
-                  <div className="text-[8px] uppercase tracking-widest text-[#475569] font-bold">
-                    Fold
-                  </div>
-                )}
-              </div>
-
-              <div className="h-4 mt-0.5">
-                {p.street_bet > 0 && !isFolded && (
-                  <div className="px-1.5 py-0.5 rounded-full bg-black/70 border border-white/15 text-[9px] font-mono-poker text-white leading-none">
-                    {p.street_bet}
-                  </div>
-                )}
-              </div>
-            </div>
+            </Fragment>
           );
         })}
+
+        {dealing && (
+          <DealOverlay
+            players={players}
+            buttonSeat={buttonSeat}
+            seatPositions={seatPositions}
+            onSkip={onSkipDeal}
+          />
+        )}
       </div>
     </div>
   );

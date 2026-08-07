@@ -64,7 +64,7 @@ export default function Train() {
     // Load first hand on mount only. loadHand is a stable useCallback and
     // tournament is only re-set via user actions which trigger their own loads.
     loadHand(tournament.playersRemaining);
-     
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadHand]);
 
   const handleAction = (action) => {

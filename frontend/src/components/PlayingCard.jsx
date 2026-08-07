@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import { SUIT_META } from "@/lib/poker";
 
 /**
@@ -56,5 +57,56 @@ export default function PlayingCard({ rank, suit, size = "lg", faceDown = false 
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Envoltorio SOLO para las cartas del HERO justo cuando termina el reparto:
+ * monta ya "boca abajo" (rotateY 180) y gira hasta boca arriba (rotateY 0),
+ * el clásico flip de mirar tus propias cartas. Un montaje = un giro, así que
+ * el caller debe montarlo una única vez por mano (no en cada re-render).
+ *
+ * `entrance=true` añade además un pequeño fade + desplazamiento de entrada
+ * ANTES del giro — pensado para las cartas comunitarias (flop/turn/river),
+ * que si no aparecían de golpe en el centro de la mesa en vez de "llegar" a
+ * su sitio. Se reutiliza el mismo componente (no uno nuevo) para no duplicar
+ * el flip: por defecto (`entrance=false`, el uso del hero) el comportamiento
+ * es exactamente el de antes.
+ */
+export function RevealCard({ rank, suit, size = "lg", entrance = false }) {
+  const flip = (
+    <motion.div
+      initial={{ rotateY: 180 }}
+      animate={{ rotateY: 0 }}
+      transition={{ duration: 0.35, ease: "easeOut", delay: entrance ? 0.05 : 0 }}
+      style={{ transformStyle: "preserve-3d" }}
+    >
+      <div style={{ backfaceVisibility: "hidden" }}>
+        <PlayingCard rank={rank} suit={suit} size={size} />
+      </div>
+      <div className="absolute inset-0" style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}>
+        <PlayingCard faceDown size={size} />
+      </div>
+    </motion.div>
+  );
+
+  if (!entrance) {
+    return (
+      <div className="relative" style={{ perspective: "600px" }}>
+        {flip}
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      className="relative"
+      style={{ perspective: "600px" }}
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+    >
+      {flip}
+    </motion.div>
   );
 }
