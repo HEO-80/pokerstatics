@@ -37,6 +37,11 @@ es una heurística razonable para dar un número orientativo):
   el resto de rivales se ignoran para este cálculo; esto se marca explícitamente
   en la respuesta (`multiway: true`) para que el frontend pueda avisar de que
   es una aproximación más floja que en un pote heads-up.
+
+Recomendación final (v1, plantilla — NO IA, NO ICM/estrategia de fase de
+torneo, eso es coach v2): derive_recommendation() traduce equity vs pot odds
+vs breakeven en fold/call/raise + color, con umbrales documentados justo
+encima de esa función.
 """
 
 from __future__ import annotations
@@ -119,6 +124,142 @@ def pick_villain_seat(hand: Hand, hero_seat: int) -> int | None:
     return pool[0]
 
 
+def _position_word(hand: Hand, hero_seat: int) -> str:
+    if hero_seat == hand.button_seat:
+        return "el botón"
+    if hero_seat == hand.sb_seat:
+        return "la ciega pequeña"
+    if hero_seat == hand.bb_seat:
+        return "la ciega grande"
+    return "una posición sin ciega"
+
+
+# ---------------------------------------------------------------------------
+# Recomendación final (v1, PLANTILLA — nada de IA): traduce los números YA
+# calculados arriba (equity estimada vs required_equity_pct de pot_odds, y el
+# breakeven de una subida estándar) en fold/call/raise + color, con una
+# explicación breve. NO mete estrategia de ICM ni de fase de torneo (eso
+# queda para un coach v2 con IA) — la posición y el stack del hero se
+# mencionan solo como CONTEXTO en el texto, la recomendación en sí se basa
+# íntegramente en la matemática de arriba.
+#
+# Umbrales (en puntos porcentuales de equity, sobre `margin = equity_pct -
+# required_equity_pct` cuando hay algo que pagar):
+#   FOLD_MARGIN_PCT    = -5   margin <= -5            -> fold claro (-EV).
+#   MARGINAL_BAND_PCT  =  5   |margin| <= 5            -> decisión marginal:
+#                             call y raise son ambas defendibles, se marca
+#                             `es_marginal=True` y se mencionan las dos líneas.
+#   RAISE_MARGIN_PCT   = 20   margin >= 20 ...
+#   RAISE_MIN_EQUITY_PCT = 55 ...Y ADEMÁS equity_pct >= 55 -> mano con ventaja
+#                             CLARA (no solo "buenas odds" con una mano floja)
+#                             -> raise de valor, tamaño = el mismo breakeven
+#                             de la subida estándar ya calculado (~2/3 bote).
+#   Cualquier otro caso con margin > MARGINAL_BAND_PCT -> call rentable pero
+#   sin ventaja tan grande como para inflar el bote -> call.
+#
+# Cuando no hay nada que pagar (to_call<=0) el marco de "pot odds" no aplica
+# (required_equity_pct sería 0, y comparar contra eso siempre "ganaría" sin
+# decir nada útil) -> se usa un umbral de equity absoluta aparte
+# (RAISE_MIN_EQUITY_PCT, el mismo 55%) para decidir entre apostar por valor
+# (raise) o simplemente pasar. En ese caso concreto la acción devuelta es
+# "check" en vez de "call" (no tiene sentido "pagar" cuando no hay nada que
+# igualar) — es la única extensión sobre el trío fold/call/raise, y solo
+# aparece con to_call<=0.
+FOLD_MARGIN_PCT = -5.0
+MARGINAL_BAND_PCT = 5.0
+RAISE_MARGIN_PCT = 20.0
+RAISE_MIN_EQUITY_PCT = 55.0
+
+
+def derive_recommendation(
+    hand: Hand, hero_seat: int, to_call: float, po: dict, equity: dict | None, breakeven: dict | None
+) -> dict | None:
+    """Ver los umbrales documentados arriba. Devuelve None si no hay equity
+    estimada (sin ella no hay número con el que fundamentar nada)."""
+    if equity is None:
+        return None
+
+    eq_pct = equity["equity_pct"]
+    hero_stack = hand.players[hero_seat].stack
+    context = f"Estás en {_position_word(hand, hero_seat)} con {hero_stack} fichas de stack."
+
+    if to_call <= 0:
+        if eq_pct >= RAISE_MIN_EQUITY_PCT and breakeven is not None:
+            return {
+                "accion_sugerida": "raise",
+                "color": "green",
+                "raise_to": breakeven["raise_to"],
+                "es_marginal": False,
+                "explicacion": (
+                    f"No hay nada que pagar y tu equity estimada (~{eq_pct}%) es alta -> apostar por "
+                    f"valor tiene sentido (sube a {breakeven['raise_to']}). {context}"
+                ),
+            }
+        return {
+            "accion_sugerida": "check",
+            "color": "blue",
+            "raise_to": None,
+            "es_marginal": False,
+            "explicacion": (
+                f"No hay nada que pagar; con ~{eq_pct}% de equity estimada no es una mano tan clara "
+                f"para apostar por valor -> pasar gratis y ver la siguiente carta es razonable. {context}"
+            ),
+        }
+
+    required = po["required_equity_pct"]
+    margin = eq_pct - required
+
+    if margin <= FOLD_MARGIN_PCT:
+        return {
+            "accion_sugerida": "fold",
+            "color": "red",
+            "raise_to": None,
+            "es_marginal": False,
+            "explicacion": (
+                f"Tu equity estimada (~{eq_pct}%) no llega al {required}% que pide el bote -> pagar "
+                f"aquí pinta -EV, lo razonable es fold. {context}"
+            ),
+        }
+
+    if abs(margin) <= MARGINAL_BAND_PCT:
+        raise_hint = f", o raise a {breakeven['raise_to']} para presionar" if breakeven else ""
+        return {
+            "accion_sugerida": "call",
+            "color": "blue",
+            "raise_to": breakeven["raise_to"] if breakeven else None,
+            "es_marginal": True,
+            "explicacion": (
+                f"Tu equity estimada (~{eq_pct}%) está muy cerca del {required}% que pide el bote -> "
+                f"decisión marginal: call para controlar el bote{raise_hint}, ambas líneas son "
+                f"defendibles aquí, ninguna es un error grande. {context}"
+            ),
+        }
+
+    if margin >= RAISE_MARGIN_PCT and eq_pct >= RAISE_MIN_EQUITY_PCT and breakeven is not None:
+        return {
+            "accion_sugerida": "raise",
+            "color": "green",
+            "raise_to": breakeven["raise_to"],
+            "es_marginal": False,
+            "explicacion": (
+                f"Tu equity estimada (~{eq_pct}%) supera el {required}% que pide el bote con margen "
+                f"amplio y tu mano tiene ventaja clara sobre el rango del rival -> raise de valor a "
+                f"{breakeven['raise_to']}. {context}"
+            ),
+        }
+
+    return {
+        "accion_sugerida": "call",
+        "color": "blue",
+        "raise_to": None,
+        "es_marginal": False,
+        "explicacion": (
+            f"Tu equity estimada (~{eq_pct}%) supera el {required}% que pide el bote -> pagar es "
+            f"rentable, pero sin ventaja tan clara como para inflar el bote -> call. {context}"
+        ),
+    }
+
+
 def standard_raise_to(hand: Hand, legal: dict) -> float | None:
     """Importe TOTAL (to_amount de Hand.apply_action) de una subida "estándar"
     del hero: apuesta actual + 2/3 del bote, acotado a los límites legales de
@@ -179,6 +320,8 @@ def build_coach_response(hand: Hand, hero_seat: int) -> dict:
         equity = {**eq, "estimated": True}
         equity_note = criterion
 
+    recommendation = derive_recommendation(hand, hero_seat, to_call, po, equity, breakeven)
+
     return {
         "street": hand.street.value,
         "board": [card_str(c) for c in hand.board],
@@ -197,4 +340,5 @@ def build_coach_response(hand: Hand, hero_seat: int) -> dict:
         "equity_vs_villain_range": equity,
         "equity_estimation_note": equity_note,
         "breakeven_standard_raise": breakeven,
+        "recommendation": recommendation,
     }

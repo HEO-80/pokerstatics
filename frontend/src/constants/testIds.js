@@ -68,6 +68,7 @@ export const PLAY = {
   helpPanel: "play-help-panel",
   soundToggleBtn: "play-sound-toggle-btn",
   turnTimer: "play-turn-timer",
+  turnTimerPauseBtn: "play-turn-timer-pause-btn",
 };
 
 export const TOURNAMENT = {

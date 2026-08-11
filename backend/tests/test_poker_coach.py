@@ -141,6 +141,93 @@ def test_coach_pot_odds_and_breakeven_are_exact_and_equity_is_sane():
     note = data["equity_estimation_note"]
     assert "subió" in note
 
+    # --- recomendación: dado que eq_pct está garantizado en [55,100] arriba,
+    # margin = eq_pct - 28.57 está garantizado en [26.43, 71.43] -> siempre
+    # >= RAISE_MARGIN_PCT (20) y eq_pct siempre >= RAISE_MIN_EQUITY_PCT (55)
+    # -> la recomendación es determinista: raise de valor, mismo tamaño que
+    # el breakeven ya comprobado arriba (107).
+    rec = data["recommendation"]
+    assert rec is not None
+    assert rec["accion_sugerida"] == "raise"
+    assert rec["color"] == "green"
+    assert rec["raise_to"] == 107
+    assert rec["es_marginal"] is False
+    assert "raise" in rec["explicacion"].lower()
+
+
+def _known_heads_up_hand_weak_vs_shove() -> Hand:
+    """
+    Mismo patrón que _known_heads_up_hand, pero al revés: el hero recibe la
+    peor mano inicial posible (7-2 offsuit) en un board A-K-Q (todo cartas
+    altas que conectan de lleno con el rango recortado del villano), y el
+    villano se va ALL-IN en el flop (no solo apuesta) -> to_call/pot_odds
+    quedan altos Y la equity del hero queda muy baja: dos razones
+    independientes para que la recomendación sea, sin ambigüedad, fold.
+    """
+    prefix = [
+        make_card("J", "d"),  # villano carta 1 (irrelevante para la equity)
+        make_card("7", "c"),  # hero carta 1
+        make_card("T", "c"),  # villano carta 2 (irrelevante para la equity)
+        make_card("2", "d"),  # hero carta 2 -> hero = 72o, la peor mano
+        make_card("3", "h"),  # burn antes del flop
+        make_card("A", "s"),  # flop 1
+        make_card("K", "d"),  # flop 2
+        make_card("Q", "h"),  # flop 3 -> board A-K-Q, no conecta con 72o
+    ]
+    deck = deck_with_known_cards(prefix)
+    hand = Hand(
+        players=[
+            PlayerState(seat=0, name="Villano", stack=200.0),
+            PlayerState(seat=1, name="Hero", stack=200.0),
+        ],
+        button_seat=0,
+        sb=5,
+        bb=10,
+        deck=deck,
+    )
+    hand.apply_action(0, "raise", to_amount=30)
+    hand.apply_action(1, "call")
+    hand.apply_action(1, "check")
+    hand.apply_action(0, "all_in")  # villano se juega el resto del stack (170)
+    return hand
+
+
+def test_coach_recommends_fold_with_a_weak_hand_facing_a_big_shove():
+    hand = _known_heads_up_hand_weak_vs_shove()
+    hand_id = poker_table_api._STORE.put(hand, hero_seat=1, bot_profiles={0: "tag"})
+
+    assert hand.current_seat == 1
+    to_call = hand.current_bet - hand.players[1].street_bet
+    assert to_call == 170
+    assert hand.pot_total() == 230  # villano 200, hero 30
+
+    resp = client.get(f"/api/table/{hand_id}/coach")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    assert data["board"] == ["As", "Kd", "Qh"]
+    assert sorted(data["hero_cards"]) == sorted(["7c", "2d"])
+    assert data["to_call"] == 170
+
+    # pot odds: 170/(230+170)*100 = 42.5, exacto.
+    assert data["pot_odds"]["required_equity_pct"] == 42.5
+
+    # equity: 72o sin ni una pareja en un board A-K-Q contra un rango
+    # recortado al 15% más fuerte por Chen (que en este board es prácticamente
+    # siempre al menos una pareja o dos cartas más altas que un 7) -> muy
+    # baja, con margen de sobra por debajo de FOLD_MARGIN_PCT (-5) aunque el
+    # número exacto varíe algo entre corridas (Monte Carlo sin semilla fija).
+    eq = data["equity_vs_villain_range"]
+    assert eq is not None
+    assert eq["equity_pct"] <= 25.0
+
+    rec = data["recommendation"]
+    assert rec is not None
+    assert rec["accion_sugerida"] == "fold"
+    assert rec["color"] == "red"
+    assert rec["raise_to"] is None
+    assert "fold" in rec["explicacion"].lower()
+
 
 def test_coach_returns_400_when_it_is_not_the_hero_turn():
     hand_id, hand = _put_known_hand()

@@ -4,6 +4,31 @@ import { fetchTableCoach } from "@/lib/api";
 import { seatName } from "@/lib/table";
 import { cardGlyph } from "@/lib/cardGlyphs";
 
+// Colores de la recomendación final: los manda el backend (poker_coach.py,
+// derive_recommendation) como "red"/"blue"/"green" — aquí solo se traducen a
+// clases de Tailwind, ningún criterio de negocio vive en el frontend.
+const RECOMMENDATION_STYLES = {
+  red: { border: "border-[#EF4444]/40", bg: "bg-[#EF4444]/10", text: "text-[#EF4444]" },
+  blue: { border: "border-[#3B82F6]/40", bg: "bg-[#3B82F6]/10", text: "text-[#3B82F6]" },
+  green: { border: "border-[#10B981]/40", bg: "bg-[#10B981]/10", text: "text-[#10B981]" },
+};
+
+function recommendationLabel(rec) {
+  if (rec.es_marginal) return "DECISIÓN MARGINAL";
+  switch (rec.accion_sugerida) {
+    case "fold":
+      return "Mejor FOLD";
+    case "check":
+      return "Haz CHECK";
+    case "call":
+      return "Haz CALL";
+    case "raise":
+      return rec.raise_to ? `Considera RAISE a ${rec.raise_to}` : "Considera RAISE";
+    default:
+      return rec.accion_sugerida;
+  }
+}
+
 /**
  * Coach v1: llama a GET /api/table/{hand_id}/coach (backend, poker_coach.py)
  * y narra los números que devuelve con PLANTILLAS fijas en español — nada de
@@ -115,19 +140,19 @@ export default function CoachPanel({ handId, active, players }) {
   }, [active, handId]);
 
   if (!active) {
-    return <div className="text-xs text-[#475569] leading-snug">Ábrelo en tu turno para ver el análisis.</div>;
+    return <div className="text-sm text-[#475569] leading-snug">Ábrelo en tu turno para ver el análisis.</div>;
   }
   if (loading && !coach) {
     return (
-      <div className="text-xs text-[#475569] flex items-center gap-1.5">
-        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Calculando…
+      <div className="text-sm text-[#475569] flex items-center gap-1.5">
+        <Loader2 className="w-4 h-4 animate-spin" /> Calculando…
       </div>
     );
   }
   if (error) {
     return (
-      <div className="text-xs text-[#EF4444] flex items-start gap-1.5">
-        <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {error}
+      <div className="text-sm text-[#EF4444] flex items-start gap-1.5">
+        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> {error}
       </div>
     );
   }
@@ -136,7 +161,7 @@ export default function CoachPanel({ handId, active, players }) {
   const villainName = coach.villain_seat != null ? seatName(players, coach.villain_seat) : "el rival";
 
   return (
-    <div className="space-y-2.5 text-xs leading-snug">
+    <div className="space-y-3 text-sm leading-relaxed">
       {/* 1) Situación */}
       <div className="text-[#94A3B8]">
         {situationText(coach, villainName)} Tus cartas: <CardText cards={coach.hero_cards} />
@@ -150,7 +175,7 @@ export default function CoachPanel({ handId, active, players }) {
 
       {/* 2) Pot odds */}
       <div>
-        <div className="text-[10px] uppercase tracking-widest text-[#475569] mb-0.5">Pot odds</div>
+        <div className="text-[11px] uppercase tracking-widest text-[#475569] mb-0.5">Pot odds</div>
         <div className="text-white">
           {coach.to_call > 0
             ? `Para pagar necesitas ganar al menos ${coach.pot_odds.required_equity_pct}% (el bote te da ${coach.pot_odds.ratio}).`
@@ -161,13 +186,13 @@ export default function CoachPanel({ handId, active, players }) {
       {/* 3) Equity estimada */}
       {coach.equity_vs_villain_range && (
         <div>
-          <div className="text-[10px] uppercase tracking-widest text-[#475569] mb-0.5">
+          <div className="text-[11px] uppercase tracking-widest text-[#475569] mb-0.5">
             Tu equity (estimada) vs {villainName}
           </div>
           <div className="text-white">~{coach.equity_vs_villain_range.equity_pct}% contra su rango probable.</div>
-          <div className="text-[#475569] mt-0.5">{coach.equity_estimation_note}</div>
+          <div className="text-[#475569] text-xs mt-0.5">{coach.equity_estimation_note}</div>
           {coach.multiway && (
-            <div className="text-[#F59E0B] mt-0.5">
+            <div className="text-[#F59E0B] text-xs mt-0.5">
               Hay más de un rival en la mano: esta equity aproxima como si fuera mano a mano solo contra{" "}
               {villainName} (el resto de rivales no entra en el cálculo).
             </div>
@@ -178,7 +203,7 @@ export default function CoachPanel({ handId, active, players }) {
       {/* 4) Breakeven de una subida estándar */}
       {coach.breakeven_standard_raise && (
         <div>
-          <div className="text-[10px] uppercase tracking-widest text-[#475569] mb-0.5">
+          <div className="text-[11px] uppercase tracking-widest text-[#475569] mb-0.5">
             Breakeven si subes
           </div>
           <div className="text-white">
@@ -190,9 +215,30 @@ export default function CoachPanel({ handId, active, players }) {
 
       {/* 5) Lectura */}
       <div className="pt-1.5 border-t border-white/8">
-        <div className="text-[10px] uppercase tracking-widest text-[#475569] mb-0.5">Lectura</div>
+        <div className="text-[11px] uppercase tracking-widest text-[#475569] mb-0.5">Lectura</div>
         <div className="text-[#94A3B8]">{readingText(coach)}</div>
       </div>
+
+      {/* Recomendación final, destacada con el color que manda el backend */}
+      {coach.recommendation && (
+        <div
+          className={`rounded-lg border p-3 ${RECOMMENDATION_STYLES[coach.recommendation.color]?.border ?? "border-white/12"} ${
+            RECOMMENDATION_STYLES[coach.recommendation.color]?.bg ?? ""
+          }`}
+        >
+          <div
+            className={`font-display font-bold uppercase tracking-wide text-sm ${
+              RECOMMENDATION_STYLES[coach.recommendation.color]?.text ?? "text-white"
+            }`}
+          >
+            {recommendationLabel(coach.recommendation)}
+          </div>
+          <div className="text-[#94A3B8] mt-1">{coach.recommendation.explicacion}</div>
+          <div className="text-[10px] text-[#475569] mt-1.5">
+            Esto es orientativo — la decisión final siempre es tuya.
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -99,7 +99,7 @@ export default function HandTable({
 
   return (
     <div className="flex gap-4">
-      <div className="hidden lg:flex lg:flex-col w-44 shrink-0 gap-2">
+      <div className={`hidden lg:flex lg:flex-col shrink-0 gap-2 ${helpOpen ? "w-96" : "w-44"}`}>
         <button
           type="button"
           data-testid={PLAY.helpToggleBtn}
