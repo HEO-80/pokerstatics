@@ -246,3 +246,70 @@ Y hago balance, porque el Sit & Go está prácticamente cerrado a nivel funciona
 ⬜ la actividad no se tiene que reiniciar asi podemos ver que ha asaduranteo todo el rato quien gano que mano y que hicieron, que ponga tal resuvio tall hizo call tal hizo re raise, el otro all in, tal gagno el bote con tanto.. y cada mano numerada mano 23, oo mano 24 ciga bb tal, ciegga sb tal, este hace call, este hace raise, luego sale el flop, con as ded picas tal y tal.. asi todo
 
 Después de que confirmes las ciegas y hagas el commit, yo iría a por los asientos fijos + nombres + separación de la derecha (los tres van juntos, son "identidad y posición de los jugadores").
+
+# PREFLOPLAB — PROGRESO
+
+## MOTOR Y BACKEND (núcleo del juego)
+- ✅ Motor de cálculo (equity / pot odds / breakeven) — verificado
+- ✅ Paso 1 — Motor de una mano (reparto, apuestas, side-pots)
+- ✅ Paso 2 — IA de los bots (perfiles, rangos, equity)
+- ✅ Paso 3 — Endpoint de la mesa (jugable por API, cartas ocultas)
+
+## MESA VISUAL (Paso 4) — casi cerrada
+- ✅ Mesa ovalada, cartas al centro, botones sin scroll
+- ✅ Modos separados: Práctica / Torneo / Sit&Go
+- ✅ Orden de acción horario + showdown claro (cartas ganadoras, reparto)
+- ✅ Fichas de apuesta y pilas por jugador según stack
+- ✅ Fichas de apuesta y pilas por jugador según stack
+- ✅ Reparto animado desde el centro + reverso de carta + board animado
+- ✅ Dealer aleatorio y rotación correcta
+- ✅ Ciegas que suben (por vuelta del botón)
+- ✅ Asientos fijos (no se mueven al eliminarse alguien)
+- ✅ Nombres reales de jugadores + pedir el nombre del hero
+- ✅ Separación de asientos (ya no se solapan)
+- ⬜  Log de actividad continuo y numerado ← EN CURSO ahora
+
+## PENDIENTE (por orden)
+- [✅ ] Persistencia del historial (que sobreviva a recargar / alimente Stats)
+- [✅ ] En la pantalla de actividad que no ponga se retira qe ponga hizo fold, que no dia iguala es hizo call, o en el caso de check, en el caso de que sube hizo raise, o 3bet o lo que sea o en vez de ir con todo hizo all in. argot de poker..
+- [ ] Sonidos (reparto, fichas) con on/off
+- [ ] Temporizador de turno (segundos para decidir + auto-fold) + tic-tac
+- [ ] Paso 5 — EL COACH (el bot de ayuda / pensamiento en voz alta) ← la joya
+- [ ] Paso 6 — Puntos y niveles (scoring por calidad de decisión)
+
+## MÁS ADELANTE (grande)
+- [ ] Torneo multi-mesa de 500 (simular todas las mesas hasta la final)
+- [ ] Registro / login con tu nombre real
+- [ ] Extraer charts de PokerCoaching (PDF) como más datos de rangos
+
+## NOTAS
+- Arrancar Claude Code en la carpeta pokerstatics.
+- Backend PARA JUGAR: uvicorn server:app --port 8000  (SIN --reload, o se pierde la mano)
+- Backend cuando se toca código: se puede usar --reload
+- Frontend: cd frontend && yarn start
+- Mongo: docker start mongo-preflop
+- Hacer commit después de cada pieza que funcione.
+- Residuos de Emergent aún por limpiar: test_scenarios_api.py (error de entorno inofensivo).
+
+Vale, aquí hay dos cosas muy distintas y quiero ser claro contigo con la segunda, porque es importante.
+
+La primera parte — revisar que cada pestaña tenga su función — es muy sensata. Ahora mismo tienes pestañas que se solapan o que no está claro para qué sirven, y ordenarlo es buena idea. Tu propuesta tiene sentido:
+
+Sit&Go → jugar una mesa de 9, entrar y salir. ✅ ya hace eso
+Torneo → un torneo con progresión. ✅ ya hace eso (falta el multi-mesa grande)
+Práctica → jugar manos sueltas con contexto. ✅ existe
+Train → manos para analizar (el quiz de rangos GTO). ✅ existe
+
+El trabajo aquí sería sobre todo de claridad: que al entrar en cada una se entienda para qué es, quitar solapes, y decidir si "Práctica" y "Train" no acaban siendo demasiado parecidas. Eso lo podemos revisar cuando cierres el log. Es una buena tarea de "poner orden".
+
+La segunda parte — una web oficial para jugar con dinero real — aquí tengo que pararte, y en serio. No es por cortarte el sueño, es información que necesitas tener antes de invertir un solo minuto ahí:
+
+Montar una plataforma donde la gente juega al poker con dinero real no es un proyecto de programación más grande. Es un negocio de juego con dinero real (real-money gambling), y eso es una de las actividades más reguladas que existen. En España concretamente, lo controla la DGOJ (Dirección General de Ordenación del Juego), necesitas una licencia estatal que cuesta mucho dinero y un proceso largo, con requisitos durísimos: capital social mínimo, auditorías, sistemas certificados de RNG (generación aleatoria), verificación de identidad de jugadores (KYC), prevención de blanqueo de capitales, protección de menores, juego responsable, custodia del dinero de los jugadores en cuentas separadas... Operar sin licencia es un delito, no una multa. Y esto es solo España; cada país tiene su propio régimen.
+
+Dicho de otra forma: la parte de "programar la mesa" que estás haciendo sería el 1% de ese proyecto. El otro 99% es legal, financiero, regulatorio y de licencias. No es algo que se hace "cuando terminemos esto", es un salto a otra liga completamente distinta.
+
+Y aquí está la buena noticia: lo que estás construyendo — un entrenador de poker — NO tiene nada de eso. No hay dinero real, no hay apuestas reales, es una herramienta educativa. Puedes lanzarlo, cobrar por él (suscripción de entrenamiento), tener usuarios, todo, sin licencia de juego, porque no es juego con dinero. Es exactamente el tipo de producto que sí puedes sacar tú solo. De hecho encaja perfecto con tu marca de desarrollador y tu perfil.
+
+Mi consejo honesto: el entrenador es tu producto real y viable. Termínalo, hazlo bueno, y si algún día quieres ir a lo del dinero real, eso sería buscar socios, inversión y un equipo legal — no un paso más de este proyecto. No mezcles las dos cosas, porque lo segundo puede paralizar o hundir lo primero.
+
+Para lo inmediato: cuando termines el log de actividad, mi propuesta es hacer esa revisión de pestañas que dices (que cada una tenga su función clara), porque es un buen momento para ordenar antes de meter el coach. ¿Te parece que después del log vayamos a por eso, o prefieres seguir con la persistencia/coach y dejamos la revisión de pestañas para más adelante?

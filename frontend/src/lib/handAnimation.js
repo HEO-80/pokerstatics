@@ -119,8 +119,14 @@ export function nextRaiseNumber(tracker, entry) {
  *   es la del reparto inicial, donde el hero aún no ha actuado).
  * - onFrame(view-like): se llama en cada paso con un objeto con la MISMA
  *   forma que `view` para poder hacer setView(...) directamente.
- * - onLogAppend(entry): se llama solo para acciones de BOT (no la del hero),
- *   para ir alimentando el panel de "Actividad" en el mismo orden.
+ * - onLogAppend(entry, { isHero }): se llama para CADA acción (bot Y hero,
+ *   en orden cronológico real) para ir alimentando el historial de
+ *   "Actividad" — `isHero` distingue la del hero por si el caller quiere
+ *   tratarla distinto (p.ej. resaltarla), pero también se registra.
+ * - onBoardReveal(cards, street): se llama cuando el board visible CRECE
+ *   (p.ej. al entrar en flop/turn/river), con las cartas NUEVAS de esa calle
+ *   — para poder anotar en el historial "[flop] Reparto: ...", etc. en el
+ *   mismo punto cronológico en que se revelan.
  */
 export async function animateHandUpdate({
   baseView,
@@ -128,6 +134,7 @@ export async function animateHandUpdate({
   heroEntry = null,
   onFrame,
   onLogAppend,
+  onBoardReveal = () => {},
   raiseTracker = createRaiseTracker(),
   delayMs = 750,
 }) {
@@ -159,7 +166,11 @@ export async function animateHandUpdate({
     const raiseNumber = nextRaiseNumber(raiseTracker, entry);
 
     working = applyLogEntryToPlayers(working, entry);
+    const prevBoardLen = visibleBoardLen;
     visibleBoardLen = Math.max(visibleBoardLen, boardLenForStreet(entry.street));
+    if (visibleBoardLen > prevBoardLen) {
+      onBoardReveal((data.board || []).slice(prevBoardLen, visibleBoardLen), entry.street);
+    }
     const potTotal = working.reduce((sum, p) => sum + p.total_committed, 0);
     const currentBet = working.reduce((max, p) => Math.max(max, p.street_bet), 0);
 
@@ -177,7 +188,7 @@ export async function animateHandUpdate({
       actionBubble: { seat: entry.seat, action: entry.action, amount: entry.amount, total: entry.total },
     });
 
-    if (!isHeroStep) onLogAppend(raiseNumber != null ? { ...entry, raiseNumber } : entry);
+    onLogAppend(raiseNumber != null ? { ...entry, raiseNumber } : entry, { isHero: isHeroStep });
 
     const isLast = i === entries.length - 1;
     const delay = isHeroStep ? 300 : isLast ? Math.min(delayMs, 500) : delayMs;

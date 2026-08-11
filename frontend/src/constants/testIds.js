@@ -78,6 +78,7 @@ export const TOURNAMENT = {
   newTournamentBtn: "tournament-new-btn",
   levelBadge: "tournament-level-badge",
   heroNameInput: "tournament-hero-name-input",
+  startLevelSelect: "tournament-start-level-select",
 };
 
 export const SITANDGO = {
@@ -91,6 +92,7 @@ export const SITANDGO = {
   backToLobbyBtn: "sitandgo-back-to-lobby-btn",
   levelBadge: "sitandgo-level-badge",
   heroNameInput: "sitandgo-hero-name-input",
+  startLevelSelect: "sitandgo-start-level-select",
 };
 
 export const STATS = {

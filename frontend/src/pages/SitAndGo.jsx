@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState } from "react";
 import { Crown, RotateCw, LogOut, Skull, Trophy, TrendingUp } from "lucide-react";
 import HandTable from "@/components/HandTable";
+import ActivityLog from "@/components/ActivityLog";
 import { createTableHand } from "@/lib/api";
-import { seatRoles } from "@/lib/table";
+import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { SITANDGO } from "@/constants/testIds";
-import { blindsForLevel, createLevelTracker, advanceLevelTracker } from "@/lib/blindLevels";
+import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
 import { pickRandomNames } from "@/lib/playerNames";
 
 // Sit & Go — ESQUELETO MÍNIMO: siempre 9 asientos (tú + 8 bots) en UNA sola
@@ -23,6 +24,7 @@ const LOBBY_DEFAULTS = {
   heroName: "",
   startingStack: 100,
   botProfile: "tag",
+  startLevel: 1,
 };
 
 const fieldClass =
@@ -76,8 +78,16 @@ export default function SitAndGo() {
   // mismo punto del óvalo, aunque el backend renumere sus asientos.
   const rosterRef = useRef([]);
   const aliveSlotsRef = useRef([]);
-  const { view, botLog, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
-    useTableSession();
+  const { view, handHistory, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
+    useTableSession("sitandgo");
+  // El asiento de backend SÍ se renumera cada mano según quién sobrevive
+  // (ver buildSurvivorHand) — hay que pasar por aliveSlotsRef (asiento de
+  // ESTA mano -> slot persistente) antes de mirar el roster, igual que hace
+  // `displayView` más abajo para pintar la mesa.
+  const getPlayerName = useCallback((seat, players) => {
+    const slot = aliveSlotsRef.current[seat] ?? seat;
+    return rosterRef.current[slot] ?? seatName(players, seat);
+  }, []);
 
   const dealHand = useCallback(
     async (cfg, numPlayers, stacksBySeat, tracker) => {
@@ -113,16 +123,29 @@ export default function SitAndGo() {
             bot_profiles: cfg.botProfile,
             ...(stacksBySeat ? { stacks: stacksBySeat } : {}),
           }),
-        { heroSeat: HERO_SEAT, buttonSeat: button, stacksBySeat: stacks, sb: blinds.sb, bb: blinds.bb },
+        {
+          heroSeat: HERO_SEAT,
+          buttonSeat: button,
+          stacksBySeat: stacks,
+          sb: blinds.sb,
+          bb: blinds.bb,
+          level: tracker.level,
+          getPlayerName,
+        },
         () => setPhase("lobby"),
       );
       if (!data) setPhase("lobby");
     },
-    [dealAnimated],
+    [dealAnimated, getPlayerName],
   );
 
   const startSitAndGo = (e) => {
     e.preventDefault();
+    // Una partida NUEVA no debe arrastrar el historial de la anterior —
+    // reset() también limpia lo persistido en localStorage (ver
+    // useTableSession.js), así que esto cubre tanto "empezar tras salir"
+    // como "recargué la página a media partida y ahora empiezo otra".
+    reset();
     const heroName = lobby.heroName.trim() || "Hero";
     rosterRef.current = [heroName, ...pickRandomNames(TOTAL_SEATS - 1)];
     // Primera mano: el asiento de backend i ES el slot i (identidad = orden
@@ -134,7 +157,9 @@ export default function SitAndGo() {
     };
     setConfig(cfg);
     nextButtonRef.current = null;
-    dealHand(cfg, TOTAL_SEATS, null, createLevelTracker());
+    const allowedLevels = allowedStartLevels(cfg.startingStack);
+    const startLevel = allowedLevels.includes(Number(lobby.startLevel)) ? Number(lobby.startLevel) : 1;
+    dealHand(cfg, TOTAL_SEATS, null, createLevelTracker(startLevel));
   };
 
   const nextHand = () => {
@@ -162,6 +187,10 @@ export default function SitAndGo() {
 
   const roles = view ? seatRoles(view.players.length, buttonSeat) : null;
   const heroStack = view?.players.find((p) => p.seat === HERO_SEAT)?.stack ?? 0;
+
+  // Niveles de la tabla que se pueden elegir como inicio con el stack actual
+  // del lobby (tope BB <= stack/2, ver lib/blindLevels.js).
+  const lobbyAllowedLevels = allowedStartLevels(Number(lobby.startingStack) || 0);
   const survivorsLeft = view ? view.players.filter((p) => p.stack > 0).length : 0;
   const heroBusted = heroStack <= 0;
   const heroWonTable = !heroBusted && survivorsLeft <= 1;
@@ -233,9 +262,9 @@ export default function SitAndGo() {
             Mesa única de {TOTAL_SEATS} jugadores (tú + {TOTAL_SEATS - 1} bots). Se juega hasta que
             quede 1. Ciegas iniciales{" "}
             <span className="text-white font-mono-poker font-bold">
-              {blindsForLevel(1).sb}/{blindsForLevel(1).bb}
+              {blindsForLevel(lobby.startLevel).sb}/{blindsForLevel(lobby.startLevel).bb}
             </span>{" "}
-            (Nivel 1) — suben solas cada vez que el botón completa una vuelta a la mesa.
+            (Nivel {lobby.startLevel}) — suben solas cada vez que el botón completa una vuelta a la mesa.
           </div>
 
           <label className="flex flex-col gap-1.5">
@@ -257,9 +286,33 @@ export default function SitAndGo() {
               type="number"
               min={1}
               value={lobby.startingStack}
-              onChange={(e) => setLobby((l) => ({ ...l, startingStack: e.target.value }))}
+              onChange={(e) => {
+                const startingStack = e.target.value;
+                const nextAllowed = allowedStartLevels(Number(startingStack) || 0);
+                const maxLevel = nextAllowed[nextAllowed.length - 1];
+                setLobby((l) => ({ ...l, startingStack, startLevel: Math.min(l.startLevel, maxLevel) }));
+              }}
               className={fieldClass}
             />
+          </label>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-[#475569]">Nivel inicial</span>
+            <select
+              data-testid={SITANDGO.startLevelSelect}
+              value={lobby.startLevel}
+              onChange={(e) => setLobby((l) => ({ ...l, startLevel: Number(e.target.value) }))}
+              className={fieldClass}
+            >
+              {lobbyAllowedLevels.map((lvl) => {
+                const blinds = blindsForLevel(lvl);
+                return (
+                  <option key={lvl} value={lvl}>
+                    Nivel {lvl} · Ciegas {blinds.sb}/{blinds.bb}
+                  </option>
+                );
+              })}
+            </select>
           </label>
 
           <label className="flex flex-col gap-1.5">
@@ -286,6 +339,18 @@ export default function SitAndGo() {
             <Crown className="w-5 h-5" /> Empezar Sit &amp; Go
           </button>
         </form>
+      )}
+
+      {phase === "lobby" && handHistory.length > 0 && (
+        <div className="max-w-2xl mt-4">
+          <div className="text-xs text-[#94A3B8] mb-2">
+            Historial de la última partida (sin terminar) — se borra al empezar un Sit&amp;Go nuevo.
+          </div>
+          <ActivityLog
+            handHistory={handHistory}
+            className="glass-panel rounded-2xl p-3 max-h-64 overflow-y-auto"
+          />
+        </div>
       )}
 
       {error && (
@@ -345,7 +410,7 @@ export default function SitAndGo() {
           <HandTable
             view={displayView}
             roles={roles}
-            botLog={botLog}
+            handHistory={handHistory}
             onAction={applyAction}
             loading={loading || animating}
             dealing={dealing}

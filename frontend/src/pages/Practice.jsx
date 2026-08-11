@@ -26,7 +26,7 @@ export default function Practice() {
   // en vez del hardcode a 0 (que con hero_seat también en 0 por defecto hacía
   // que el hero fuera siempre el dealer inicial). Rota normalmente después.
   const nextButtonRef = useRef(null);
-  const { view, botLog, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
+  const { view, handHistory, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
     useTableSession();
 
   const startHand = useCallback(
@@ -108,7 +108,7 @@ export default function Practice() {
         <HandTable
           view={view}
           roles={roles}
-          botLog={botLog}
+          handHistory={handHistory}
           onAction={applyAction}
           loading={loading || animating}
           dealing={dealing}

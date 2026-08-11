@@ -29,8 +29,24 @@ export function blindsForLevel(level) {
   return { sb: last.sb * factor, bb: last.bb * factor };
 }
 
-export function createLevelTracker() {
-  return { level: 1, handsAtLevel: 0 };
+export function createLevelTracker(startLevel = 1) {
+  return { level: startLevel, handsAtLevel: 0 };
+}
+
+/**
+ * Niveles (1-indexados) de BLIND_LEVELS que se pueden elegir como nivel
+ * INICIAL para un stack dado, con el tope BB <= stack/2 (evitar arrancar una
+ * partida donde una sola mano ya deja a alguien pot-committed). Como la BB
+ * crece de forma monótona con el nivel, esto es siempre un prefijo
+ * contiguo 1..N — se devuelve así para que un <select> lo pueda recorrer
+ * directamente. Si el stack es tan bajo que ni el nivel 1 cumple el tope
+ * (stack < 4), se deja igualmente el nivel 1 disponible: no tiene sentido
+ * dejar el selector vacío.
+ */
+export function allowedStartLevels(startingStack) {
+  const cap = startingStack / 2;
+  const levels = BLIND_LEVELS.map((_, i) => i + 1).filter((lvl) => blindsForLevel(lvl).bb <= cap);
+  return levels.length > 0 ? levels : [1];
 }
 
 /**

@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState } from "react";
 import { Swords, RotateCw, LogOut, Skull, TrendingUp } from "lucide-react";
 import HandTable from "@/components/HandTable";
+import ActivityLog from "@/components/ActivityLog";
 import { createTableHand } from "@/lib/api";
-import { seatRoles } from "@/lib/table";
+import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { TOURNAMENT } from "@/constants/testIds";
-import { blindsForLevel, createLevelTracker, advanceLevelTracker } from "@/lib/blindLevels";
+import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
 import { pickRandomNames } from "@/lib/playerNames";
 
 // Modo Torneo — ESQUELETO MÍNIMO: una sola mesa, sin mesas paralelas, sin
@@ -24,6 +25,7 @@ const LOBBY_DEFAULTS = {
   heroName: "",
   opponents: 5,
   startingStack: 100,
+  startLevel: 1,
 };
 
 const fieldClass =
@@ -50,8 +52,15 @@ export default function Tournament() {
   // nunca se renumera (los bots eliminados se quedan sentados a 0), así que
   // no hace falta ninguna traducción de posición — solo el nombre.
   const rosterRef = useRef([]);
-  const { view, botLog, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
-    useTableSession();
+  const { view, handHistory, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
+    useTableSession("tournament");
+  // El asiento de backend nunca se renumera en Torneo, así que traducir a un
+  // nombre persistente es trivial: rosterRef[seat], con fallback al nombre
+  // crudo del backend por si acaso (no debería hacer falta).
+  const getPlayerName = useCallback(
+    (seat, players) => rosterRef.current[seat] ?? seatName(players, seat),
+    [],
+  );
 
   const dealHand = useCallback(
     async (cfg, stacksBySeat, tracker) => {
@@ -87,16 +96,29 @@ export default function Tournament() {
             bot_profiles: "tag",
             ...(stacksBySeat ? { stacks: stacksBySeat } : {}),
           }),
-        { heroSeat: HERO_SEAT, buttonSeat: button, stacksBySeat: stacks, sb: blinds.sb, bb: blinds.bb },
+        {
+          heroSeat: HERO_SEAT,
+          buttonSeat: button,
+          stacksBySeat: stacks,
+          sb: blinds.sb,
+          bb: blinds.bb,
+          level: tracker.level,
+          getPlayerName,
+        },
         () => setPhase("lobby"),
       );
       if (!data) setPhase("lobby");
     },
-    [dealAnimated],
+    [dealAnimated, getPlayerName],
   );
 
   const startTournament = (e) => {
     e.preventDefault();
+    // Una partida NUEVA no debe arrastrar el historial de la anterior —
+    // reset() también limpia lo persistido en localStorage (ver
+    // useTableSession.js), así que esto cubre tanto "empezar tras salir"
+    // como "recargué la página a media partida y ahora empiezo otra".
+    reset();
     const cfg = {
       numPlayers: Number(lobby.opponents) + 1,
       startingStack: Number(lobby.startingStack),
@@ -108,7 +130,9 @@ export default function Tournament() {
     );
     setConfig(cfg);
     nextButtonRef.current = null;
-    dealHand(cfg, null, createLevelTracker());
+    const allowedLevels = allowedStartLevels(cfg.startingStack);
+    const startLevel = allowedLevels.includes(Number(lobby.startLevel)) ? Number(lobby.startLevel) : 1;
+    dealHand(cfg, null, createLevelTracker(startLevel));
   };
 
   const nextHand = () => {
@@ -136,6 +160,11 @@ export default function Tournament() {
 
   const roles = view ? seatRoles(view.players.length, buttonSeat) : null;
   const heroStack = view?.players.find((p) => p.seat === HERO_SEAT)?.stack;
+
+  // Niveles de la tabla que se pueden elegir como inicio con el stack actual
+  // del lobby (tope BB <= stack/2, ver lib/blindLevels.js). Se recalcula en
+  // cada render, así que cambiar el stack ya deja el selector al día solo.
+  const lobbyAllowedLevels = allowedStartLevels(Number(lobby.startingStack) || 0);
 
   // Igual que en Sit&Go: misma vista, con el nombre persistente del roster
   // añadido a cada jugador (aquí el asiento nunca cambia de significado, así
@@ -189,9 +218,9 @@ export default function Tournament() {
           <div className="col-span-2 md:col-span-4 text-xs text-[#94A3B8]">
             Ciegas iniciales{" "}
             <span className="text-white font-mono-poker font-bold">
-              {blindsForLevel(1).sb}/{blindsForLevel(1).bb}
+              {blindsForLevel(lobby.startLevel).sb}/{blindsForLevel(lobby.startLevel).bb}
             </span>{" "}
-            (Nivel 1) — suben solas cada vez que el botón completa una vuelta a la mesa.
+            (Nivel {lobby.startLevel}) — suben solas cada vez que el botón completa una vuelta a la mesa.
           </div>
 
           <label className="flex flex-col gap-1.5">
@@ -228,9 +257,33 @@ export default function Tournament() {
               type="number"
               min={1}
               value={lobby.startingStack}
-              onChange={(e) => setLobby((l) => ({ ...l, startingStack: e.target.value }))}
+              onChange={(e) => {
+                const startingStack = e.target.value;
+                const nextAllowed = allowedStartLevels(Number(startingStack) || 0);
+                const maxLevel = nextAllowed[nextAllowed.length - 1];
+                setLobby((l) => ({ ...l, startingStack, startLevel: Math.min(l.startLevel, maxLevel) }));
+              }}
               className={fieldClass}
             />
+          </label>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-[#475569]">Nivel inicial</span>
+            <select
+              data-testid={TOURNAMENT.startLevelSelect}
+              value={lobby.startLevel}
+              onChange={(e) => setLobby((l) => ({ ...l, startLevel: Number(e.target.value) }))}
+              className={fieldClass}
+            >
+              {lobbyAllowedLevels.map((lvl) => {
+                const blinds = blindsForLevel(lvl);
+                return (
+                  <option key={lvl} value={lvl}>
+                    Nivel {lvl} · Ciegas {blinds.sb}/{blinds.bb}
+                  </option>
+                );
+              })}
+            </select>
           </label>
 
           <button
@@ -242,6 +295,18 @@ export default function Tournament() {
             <Swords className="w-5 h-5" /> Empezar torneo
           </button>
         </form>
+      )}
+
+      {phase === "lobby" && handHistory.length > 0 && (
+        <div className="max-w-2xl mt-4">
+          <div className="text-xs text-[#94A3B8] mb-2">
+            Historial de la última partida (sin terminar) — se borra al empezar un torneo nuevo.
+          </div>
+          <ActivityLog
+            handHistory={handHistory}
+            className="glass-panel rounded-2xl p-3 max-h-64 overflow-y-auto"
+          />
+        </div>
       )}
 
       {error && (
@@ -281,7 +346,7 @@ export default function Tournament() {
           <HandTable
             view={displayView}
             roles={roles}
-            botLog={botLog}
+            handHistory={handHistory}
             onAction={applyAction}
             loading={loading || animating}
             dealing={dealing}

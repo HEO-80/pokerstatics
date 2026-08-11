@@ -2,107 +2,22 @@ import { useState } from "react";
 import { Trophy, HelpCircle } from "lucide-react";
 import PlayTable from "./PlayTable";
 import PlayActionBar from "./PlayActionBar";
+import ActivityLog from "./ActivityLog";
 import { PLAY } from "@/constants/testIds";
-
-export function seatName(players, seat) {
-  return players?.find((p) => p.seat === seat)?.name ?? `Seat ${seat}`;
-}
-
-/**
- * `entry.raiseNumber` (adjuntado en handAnimation.js/useTableSession.js al
- * reproducir el log, contando TODAS las subidas de la calle — incluidas las
- * del hero, aunque no aparezcan en este log) dice qué subida es dentro de la
- * ronda: 1 = open ("sube a"), 2 = 3-bet, 3 = 4-bet, 4 = 5-bet... Por
- * convención de póker la ciega grande cuenta como la "1ª apuesta" y el open
- * como la "2ª", así que el open NO se llama "2-bet" (se dice solo "sube a");
- * la relación entre raiseNumber y el nombre del bet es +1: raiseNumber=2 ->
- * "3-bet", raiseNumber=3 -> "4-bet", etc.
- */
-export function formatBotAction(entry, players) {
-  const name = seatName(players, entry.seat);
-  switch (entry.action) {
-    case "fold":
-      return `${name} se retira`;
-    case "check":
-      return `${name} pasa`;
-    case "call":
-      return `${name} iguala${entry.amount ? ` ${entry.amount}` : ""}`;
-    case "raise": {
-      const n = entry.raiseNumber;
-      const label = !n || n <= 1 ? `sube a ${entry.total}` : `hace ${n + 1}-bet a ${entry.total}`;
-      return `${name} ${label}`;
-    }
-    case "all_in": {
-      const amt = entry.total ?? entry.amount;
-      return `${name} va all-in${amt ? ` (${amt})` : ""}`;
-    }
-    default:
-      return `${name}: ${entry.action}`;
-  }
-}
-
-const ACTION_LOG_COLOR = {
-  fold: "text-[#EF4444]/70",
-  check: "text-[#94A3B8]",
-  call: "text-[#3B82F6]",
-  raise: "text-[#F59E0B]",
-  all_in: "text-[#F59E0B]",
-};
-
-/**
- * `winners_by_pot` trae una capa por cada nivel de all-in distinto (side
- * pots) — el backend ya lo calcula bien, pero mostrar una línea POR CAPA tal
- * cual produce justo el mensaje confuso que había antes ("Bot6 gana 4, Bot6
- * gana 3, Bot6 gana 114" cuando en realidad Bot6 se lo llevó todo). Aquí se
- * agrupan las capas que comparte EXACTAMENTE el mismo conjunto de ganadores
- * en una sola línea con el total sumado; solo queda una línea por capa
- * cuando los ganadores realmente difieren (side-pot genuino).
- */
-function groupPotResults(winnersByPot) {
-  const order = [];
-  const byKey = new Map();
-  for (const pot of winnersByPot) {
-    const key = [...pot.winners].sort((a, b) => a - b).join(",");
-    if (!byKey.has(key)) {
-      byKey.set(key, { winners: pot.winners, amount: 0, handName: null });
-      order.push(key);
-    }
-    const group = byKey.get(key);
-    group.amount += pot.amount;
-    if (!group.handName && pot.hand_name) group.handName = pot.hand_name;
-  }
-  return order.map((key) => byKey.get(key));
-}
-
-function formatPotGroupText(group, players) {
-  const names = group.winners.map((s) => seatName(players, s));
-  const handSuffix = group.handName ? ` con ${group.handName}` : "";
-  if (names.length === 1) {
-    return `${names[0]} gana ${group.amount}${handSuffix}`;
-  }
-  const namesText =
-    names.length === 2 ? names.join(" y ") : `${names.slice(0, -1).join(", ")} y ${names[names.length - 1]}`;
-  return `${namesText} empatan y se reparten ${group.amount}${handSuffix}`;
-}
-
-/** Unión de todas las cartas (hole + board) que forman la(s) mano(s) ganadora(s). */
-function collectHighlightedCards(winnersByPot) {
-  const set = new Set();
-  for (const pot of winnersByPot) {
-    for (const cards of Object.values(pot.winning_cards || {})) {
-      cards.forEach((c) => set.add(c));
-    }
-  }
-  return set;
-}
+import { groupPotResults, formatPotGroupText, collectHighlightedCards } from "@/lib/potResults";
 
 const TABLE_ROW_HEIGHT = "440px";
 
 /**
- * Mesa + controles + log de bots para una mano en curso, común a Práctica,
- * Torneo y Sit & Go (todos consumen la misma API /api/table/*, solo cambia
- * lo que pasa antes/después de la mano). `finishedActions` es el slot de
- * botones que cada página quiere mostrar cuando la mano termina.
+ * Mesa + controles + historial de Actividad para una mesa en vivo, común a
+ * Práctica, Torneo y Sit & Go (todos consumen la misma API /api/table/*,
+ * solo cambia lo que pasa antes/después de la mano). `finishedActions` es el
+ * slot de botones que cada página quiere mostrar cuando la mano termina.
+ *
+ * `handHistory` es el historial CONTINUO de la sesión entera (no se resetea
+ * entre manos, ver lib/handHistory.js y useTableSession.js) — el panel
+ * (ActivityLog.jsx) hace scroll interno y sigue "pegado" al final mientras el
+ * usuario no suba a revisar manos anteriores.
  *
  * La mesa tiene ALTURA FIJA (TABLE_ROW_HEIGHT) independiente de lo que ocupe
  * la barra de acciones debajo — antes la mesa vivía en un flex-1 dentro de un
@@ -118,7 +33,7 @@ const TABLE_ROW_HEIGHT = "440px";
 export default function HandTable({
   view,
   roles,
-  botLog,
+  handHistory,
   onAction,
   loading,
   finishedActions,
@@ -190,23 +105,11 @@ export default function HandTable({
             />
           </div>
 
-          <div
-            data-testid={PLAY.botLog}
+          <ActivityLog
+            handHistory={handHistory}
+            testId={PLAY.botLog}
             className="hidden lg:flex lg:flex-col w-56 shrink-0 glass-panel rounded-2xl p-3 overflow-y-auto"
-          >
-            <div className="shrink-0 text-[10px] uppercase tracking-widest text-[#475569] mb-2">Actividad</div>
-            {botLog.length === 0 && <div className="text-[#475569] text-xs">Sin acciones todavía.</div>}
-            <div className="space-y-1">
-              {botLog.map((entry, i) => (
-                <div key={i} className="text-xs leading-snug">
-                  <span className="text-[#475569] font-mono-poker text-[10px] mr-1">[{entry.street}]</span>
-                  <span className={ACTION_LOG_COLOR[entry.action] ?? "text-[#94A3B8]"}>
-                    {formatBotAction(entry, view.players)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+          />
         </div>
 
         <div className="shrink-0">
