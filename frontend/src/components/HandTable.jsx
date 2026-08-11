@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Trophy, HelpCircle, History, Sparkles, Volume2, VolumeX } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Trophy, HelpCircle, History, Flame, Sparkles, Star, Volume2, VolumeX } from "lucide-react";
 import PlayTable from "./PlayTable";
 import PlayActionBar from "./PlayActionBar";
 import ActivityLog from "./ActivityLog";
 import TurnTimer from "./TurnTimer";
 import CoachPanel, { villainStyleText } from "./CoachPanel";
 import AiCoachPanel from "./AiCoachPanel";
-import { PLAY } from "@/constants/testIds";
+import { PLAY, POINTS } from "@/constants/testIds";
 import { groupPotResults, formatPotGroupText, collectHighlightedCards } from "@/lib/potResults";
 import { useSoundPreference, playYourTurn, playWin, playLose } from "@/lib/sound";
 import { fetchTableCoachAi } from "@/lib/api";
 import { summarizePlayer } from "@/lib/villainStats";
+import { scoreCoachAdviceLog } from "@/lib/points";
+import { levelForPoints } from "@/lib/levels";
 
 const HELP_OPEN_STORAGE_KEY = "pokerstatics.helpOpen";
 
@@ -89,6 +91,10 @@ export default function HandTable({
   dealing = false,
   onSkipDeal,
   totalSeats,
+  // Progreso de puntos/nivel del jugador (ver hooks/usePointsProgress.js),
+  // opcional: sin él (no debería pasar en Práctica/Sit&Go/Torneo, que
+  // siempre lo pasan) el badge del HUD simplemente no se pinta.
+  pointsProgress,
 }) {
   const [helpOpen, setHelpOpen] = useState(loadHelpOpen);
   const [soundEnabled, toggleSound] = useSoundPreference();
@@ -117,6 +123,11 @@ export default function HandTable({
     : null;
   const [aiByEntryId, setAiByEntryId] = useState({});
   const aiState = liveAdviceEntry ? aiByEntryId[liveAdviceEntry.id] : undefined;
+
+  // Racha EN VIVO de esta partida (para el badge del HUD) — el total/nivel
+  // acumulado en sí vive en `pointsProgress` (bancado en tiempo real por
+  // hooks/usePointsProgress.js, una única instancia a nivel de página).
+  const liveStreak = useMemo(() => scoreCoachAdviceLog(coachAdviceLog).currentStreak, [coachAdviceLog]);
 
   const askAi = useCallback(async () => {
     const entry = liveAdviceEntry;
@@ -193,7 +204,21 @@ export default function HandTable({
 
       <div className="flex-1 min-w-0 flex flex-col gap-2.5">
         <div className="shrink-0 flex items-center gap-2 text-xs md:text-sm text-[#94A3B8] font-mono-poker">
-          <div className="flex-1" />
+          <div className="flex-1 flex items-center">
+            {pointsProgress && (
+              <div data-testid={POINTS.hudBadge} className="flex items-center gap-2.5">
+                <span className="flex items-center gap-1 text-[#F59E0B] font-bold" title="Nivel (por calidad de decisión)">
+                  <Star className="w-3.5 h-3.5" /> Nv {levelForPoints(pointsProgress.totalPoints)}
+                </span>
+                <span className="text-[#475569]">{Math.round(pointsProgress.totalPoints)} pts</span>
+                {liveStreak >= 2 && (
+                  <span className="flex items-center gap-1 text-[#EF4444]" title="Racha de aciertos consecutivos">
+                    <Flame className="w-3.5 h-3.5" /> {liveStreak}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <span
               className={`w-1.5 h-1.5 rounded-full ${

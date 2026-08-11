@@ -1,8 +1,10 @@
 import { useEffect, useState, useMemo } from "react";
 import { loadHistory, computeStats, clearHistory } from "@/lib/storage";
-import { STATS } from "@/constants/testIds";
+import { loadPointsProgress } from "@/lib/pointsStorage";
+import { levelProgress } from "@/lib/levels";
+import { STATS, POINTS } from "@/constants/testIds";
 import { actionLabel, phaseLabel, actionColor } from "@/lib/poker";
-import { Flame, Target, Layers, TrendingUp, Trash2 } from "lucide-react";
+import { Flame, Target, Layers, TrendingUp, Trash2, Star } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -23,13 +25,19 @@ function pctColor(p) {
 
 export default function Stats() {
   const [history, setHistory] = useState([]);
+  const [pointsProgress, setPointsProgress] = useState(null);
 
   useEffect(() => {
     setHistory(loadHistory());
+    setPointsProgress(loadPointsProgress());
   }, []);
 
   const stats = useMemo(() => computeStats(history), [history]);
   const empty = stats.total === 0;
+  const progress = useMemo(
+    () => (pointsProgress ? levelProgress(pointsProgress.totalPoints) : null),
+    [pointsProgress],
+  );
 
   const positionData = Object.entries(stats.byPosition).map(([pos, v]) => ({
     name: pos,
@@ -90,6 +98,50 @@ export default function Stats() {
           </button>
         )}
       </div>
+
+      {progress && (
+        <div data-testid={POINTS.statsBlock} className="mb-6 glass-panel rounded-2xl p-6">
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-[#475569]">
+            <Star className="w-3.5 h-3.5" /> Nivel y puntos (Práctica / Sit&amp;Go / Torneo)
+          </div>
+          <div className="mt-2 flex flex-wrap items-end gap-x-8 gap-y-3">
+            <div>
+              <div className="font-display font-bold text-6xl leading-none text-[#F59E0B]">
+                Nv {progress.level}
+              </div>
+              <div className="mt-1 text-sm text-[#94A3B8]">
+                <span className="font-mono-poker text-white">{Math.round(pointsProgress.totalPoints)}</span> puntos
+                acumulados por calidad de decisión
+              </div>
+            </div>
+            <div className="min-w-[220px] flex-1">
+              <div className="flex justify-between text-xs text-[#94A3B8] mb-1">
+                <span>Progreso a nivel {progress.level + 1}</span>
+                <span>
+                  {progress.pointsIntoLevel}/{progress.pointsIntoLevel + progress.pointsRemaining} pts
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-white/6 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-[#F59E0B] transition-[width] duration-500"
+                  style={{ width: `${progress.progressPct}%` }}
+                />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[#475569]">
+                <Flame className="w-3 h-3" /> Mejor racha
+              </div>
+              <div className="font-display font-bold text-3xl leading-none text-white">
+                {pointsProgress.bestStreak}
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 text-[10px] text-[#475569]">
+            Puntúa la DECISIÓN (según el coach), no si ganas el bote — ver el resumen al terminar una partida.
+          </div>
+        </div>
+      )}
 
       {empty && (
         <div className="glass-panel rounded-2xl p-10 text-center">

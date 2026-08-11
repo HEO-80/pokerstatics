@@ -8,6 +8,7 @@ import TournamentRankingPanel from "@/components/TournamentRankingPanel";
 import { createTableHand, simulateMttRound } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
+import { usePointsProgress } from "@/hooks/usePointsProgress";
 import { TOURNAMENT } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
 import { pickRandomNames } from "@/lib/playerNames";
@@ -134,6 +135,7 @@ export default function Tournament() {
     dealAnimated,
     actionAnimated,
   } = useTableSession("tournament");
+  const pointsProgress = usePointsProgress(coachAdviceLog);
 
   const getPlayerName = useCallback((seat, players) => {
     const chair = aliveSlotsRef.current[seat] ?? seat;
@@ -594,6 +596,7 @@ export default function Tournament() {
               coachAdviceLog={coachAdviceLog}
               handsPlayed={handHistory.length}
               resultLine={`Puesto ${finalPosition} de ${config?.totalEntrants}`}
+              totalPoints={pointsProgress.totalPoints}
             />
           </div>
           <button
@@ -623,6 +626,7 @@ export default function Tournament() {
               coachAdviceLog={coachAdviceLog}
               handsPlayed={handHistory.length}
               resultLine={`¡Ganaste el torneo de ${config?.totalEntrants}!`}
+              totalPoints={pointsProgress.totalPoints}
             />
           </div>
           <button
@@ -650,6 +654,7 @@ export default function Tournament() {
               coachAdviceLog={coachAdviceLog}
               handsPlayed={handHistory.length}
               resultLine={`Saliste con ${heroStack} fichas · quedaban ${remaining}/${config?.totalEntrants}`}
+              totalPoints={pointsProgress.totalPoints}
             />
           </div>
           <button
@@ -674,6 +679,7 @@ export default function Tournament() {
             dealing={dealing}
             onSkipDeal={skipDeal}
             totalSeats={TOTAL_SEATS}
+            pointsProgress={pointsProgress}
             finishedActions={
               heroStack > 0 ? (
                 <button

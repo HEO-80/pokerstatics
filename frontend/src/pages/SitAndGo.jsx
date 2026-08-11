@@ -6,6 +6,7 @@ import SessionSummary from "@/components/SessionSummary";
 import { createTableHand } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
+import { usePointsProgress } from "@/hooks/usePointsProgress";
 import { SITANDGO } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
 import { pickRandomNames } from "@/lib/playerNames";
@@ -92,6 +93,7 @@ export default function SitAndGo() {
     dealAnimated,
     actionAnimated,
   } = useTableSession("sitandgo");
+  const pointsProgress = usePointsProgress(coachAdviceLog);
   // El asiento de backend SÍ se renumera cada mano según quién sobrevive
   // (ver buildSurvivorHand) — hay que pasar por aliveSlotsRef (asiento de
   // ESTA mano -> slot persistente) antes de mirar el roster, igual que hace
@@ -397,6 +399,7 @@ export default function SitAndGo() {
               coachAdviceLog={coachAdviceLog}
               handsPlayed={handHistory.length}
               resultLine={`Saliste con ${heroStack} fichas · quedaban ${survivorsLeft}/${TOTAL_SEATS}`}
+              totalPoints={pointsProgress.totalPoints}
             />
           </div>
           <button
@@ -424,6 +427,7 @@ export default function SitAndGo() {
               coachAdviceLog={coachAdviceLog}
               handsPlayed={handHistory.length}
               resultLine={`Posición ${finalPosition} de ${TOTAL_SEATS}`}
+              totalPoints={pointsProgress.totalPoints}
             />
           </div>
           <button
@@ -451,6 +455,7 @@ export default function SitAndGo() {
               coachAdviceLog={coachAdviceLog}
               handsPlayed={handHistory.length}
               resultLine="¡Ganaste el Sit&Go!"
+              totalPoints={pointsProgress.totalPoints}
             />
           </div>
           <button
@@ -475,6 +480,7 @@ export default function SitAndGo() {
             dealing={dealing}
             onSkipDeal={skipDeal}
             totalSeats={TOTAL_SEATS}
+            pointsProgress={pointsProgress}
             finishedActions={
               heroBusted ? (
                 <button

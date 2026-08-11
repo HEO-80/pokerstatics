@@ -5,6 +5,7 @@ import PlaySetupForm from "@/components/PlaySetupForm";
 import { createTableHand } from "@/lib/api";
 import { seatRoles } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
+import { usePointsProgress } from "@/hooks/usePointsProgress";
 import { PLAY } from "@/constants/testIds";
 
 // Modo Práctica: manos sueltas contra bots. Cada mano nueva reparte stacks
@@ -39,6 +40,7 @@ export default function Practice() {
     dealAnimated,
     actionAnimated,
   } = useTableSession();
+  const pointsProgress = usePointsProgress(coachAdviceLog);
 
   const startHand = useCallback(
     async (formConfig) => {
@@ -130,6 +132,7 @@ export default function Practice() {
           loading={loading || animating}
           dealing={dealing}
           onSkipDeal={skipDeal}
+          pointsProgress={pointsProgress}
           finishedActions={
             <button
               data-testid={PLAY.nextHandBtn}

@@ -131,6 +131,15 @@ export const STATS = {
   resetBtn: "stats-reset-btn",
 };
 
+// Sistema de puntos/nivel por calidad de decisión (lib/points.js,
+// lib/levels.js) — compartido por Práctica/Sit&Go/Torneo (Train NO lo usa).
+export const POINTS = {
+  hudBadge: "points-hud-badge",
+  sessionBlock: "points-session-block",
+  levelUpNote: "points-levelup-note",
+  statsBlock: "points-stats-block",
+};
+
 export const REVIEW = {
   screen: "review-screen",
   list: "review-list",
