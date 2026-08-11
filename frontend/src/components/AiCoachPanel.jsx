@@ -1,4 +1,4 @@
-import { AlertCircle, Loader2, Sparkles } from "lucide-react";
+import { AlertCircle, Loader2, Sparkles, Square } from "lucide-react";
 import { PLAY } from "@/constants/testIds";
 
 /**
@@ -14,8 +14,14 @@ import { PLAY } from "@/constants/testIds";
  * (turno del hero, mano sin terminar — ver HandTable.jsx), no si el panel
  * izquierdo está abierto ni en qué consejo histórico esté navegando: el
  * botón de preguntar siempre es sobre LA decisión actual.
+ *
+ * `speaking`/`onStopSpeaking` (lectura por voz, lib/speech.js): cuando la
+ * respuesta llega y la voz está activada, HandTable.jsx la lee en alto
+ * automáticamente — como puede ser larga, mientras suena se cambia el botón
+ * "Volver a preguntar" por uno de "Parar lectura" (mismo sitio, no añade
+ * otro botón aparte).
  */
-export default function AiCoachPanel({ canAsk, aiState, onAsk, className }) {
+export default function AiCoachPanel({ canAsk, aiState, onAsk, speaking, onStopSpeaking, className }) {
   return (
     <div data-testid={PLAY.coachAiSection} className={className}>
       <div className="shrink-0 text-[10px] uppercase tracking-widest text-[#475569] mb-2 flex items-center gap-1.5">
@@ -62,9 +68,20 @@ export default function AiCoachPanel({ canAsk, aiState, onAsk, className }) {
             <Sparkles className="w-3.5 h-3.5" /> Análisis del coach (IA)
           </div>
           <div className="text-[#E9D5FF] leading-relaxed whitespace-pre-line text-sm">{aiState.text}</div>
-          <button type="button" onClick={onAsk} className="text-[10px] text-[#8B5CF6] hover:underline mt-2">
-            Volver a preguntar
-          </button>
+          {speaking ? (
+            <button
+              type="button"
+              data-testid={PLAY.coachAiStopSpeakingBtn}
+              onClick={onStopSpeaking}
+              className="text-[10px] text-[#EF4444] hover:underline mt-2 inline-flex items-center gap-1"
+            >
+              <Square className="w-2.5 h-2.5 fill-current" /> Parar lectura
+            </button>
+          ) : (
+            <button type="button" onClick={onAsk} className="text-[10px] text-[#8B5CF6] hover:underline mt-2">
+              Volver a preguntar
+            </button>
+          )}
         </div>
       )}
     </div>

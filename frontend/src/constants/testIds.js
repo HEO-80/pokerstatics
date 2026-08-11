@@ -77,6 +77,8 @@ export const PLAY = {
   coachAiSection: "play-coach-ai-section",
   activityToggleBtn: "play-activity-toggle-btn",
   coachAiToggleBtn: "play-coach-ai-toggle-btn",
+  voiceToggleBtn: "play-voice-toggle-btn",
+  coachAiStopSpeakingBtn: "play-coach-ai-stop-speaking-btn",
 };
 
 export const TOURNAMENT = {

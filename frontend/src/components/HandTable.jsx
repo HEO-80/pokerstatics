@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Trophy, HelpCircle, History, Flame, Sparkles, Star, Volume2, VolumeX } from "lucide-react";
+import { Trophy, HelpCircle, History, Flame, Mic, MicOff, Sparkles, Star, Volume2, VolumeX } from "lucide-react";
 import PlayTable from "./PlayTable";
 import PlayActionBar from "./PlayActionBar";
 import ActivityLog from "./ActivityLog";
 import TurnTimer from "./TurnTimer";
-import CoachPanel, { villainStyleText } from "./CoachPanel";
+import CoachPanel, { villainStyleText, readingText, recommendationLabel } from "./CoachPanel";
 import AiCoachPanel from "./AiCoachPanel";
 import { PLAY, POINTS } from "@/constants/testIds";
 import { groupPotResults, formatPotGroupText, collectHighlightedCards } from "@/lib/potResults";
 import { useSoundPreference, playYourTurn, playWin, playLose } from "@/lib/sound";
+import { useVoicePreference, speak, stopSpeaking } from "@/lib/speech";
 import { fetchTableCoachAi } from "@/lib/api";
 import { summarizePlayer } from "@/lib/villainStats";
 import { scoreCoachAdviceLog } from "@/lib/points";
@@ -58,6 +59,20 @@ function rightToggleClass(isActive, color) {
   }`;
 }
 
+/** Texto a LEER EN ALTO para una decisión del coach v1: prioriza la lectura
+ * (readingText) y la recomendación final (recommendationLabel + su
+ * explicación) — no lee pot odds/equity/breakeven número a número, que es
+ * lo que pide la tarea ("no hace falta leer TODOS los números uno a uno").
+ * Reutiliza el mismo texto que ya se ve en el panel (CoachPanel.jsx), no
+ * inventa redacción nueva. */
+function buildCoachSpokenText(entry) {
+  const parts = [readingText(entry)];
+  if (entry.recommendation) {
+    parts.push(`${recommendationLabel(entry.recommendation)}. ${entry.recommendation.explicacion}`);
+  }
+  return parts.join(" ");
+}
+
 /**
  * Mesa + controles + historial de Actividad para una mesa en vivo, común a
  * Práctica, Torneo y Sit & Go (todos consumen la misma API /api/table/*,
@@ -98,6 +113,18 @@ export default function HandTable({
 }) {
   const [helpOpen, setHelpOpen] = useState(loadHelpOpen);
   const [soundEnabled, toggleSound] = useSoundPreference();
+  // Voz del coach (lib/speech.js) — preferencia SEPARADA del sonido de
+  // efectos de arriba (fichas/cartas vs voz), por defecto desactivada.
+  // `voiceSupported` es false en navegadores sin Web Speech API: el toggle
+  // ni se pinta en ese caso (ver más abajo).
+  const [voiceEnabled, toggleVoice, voiceSupported] = useVoicePreference();
+  // Si está sonando la respuesta larga del Coach IA ahora mismo — controla
+  // si AiCoachPanel muestra "Parar lectura" en vez de "Volver a preguntar".
+  const [aiSpeaking, setAiSpeaking] = useState(false);
+  // Evita releer la MISMA decisión dos veces (p.ej. si el componente se
+  // re-renderiza sin que llegue un consejo nuevo) — guarda el id de la
+  // última entrada de coachAdviceLog ya leída en voz.
+  const lastSpokenAdviceIdRef = useRef(null);
   // Panel de la columna DERECHA: "activity" | "ai" | null — nunca los dos a
   // la vez (Tarea 2). null deja ese espacio libre para que la mesa
   // (flex-1) lo aproveche entero.
@@ -124,6 +151,26 @@ export default function HandTable({
   const [aiByEntryId, setAiByEntryId] = useState({});
   const aiState = liveAdviceEntry ? aiByEntryId[liveAdviceEntry.id] : undefined;
 
+  // Lectura por voz del coach v1: en cuanto aparece un consejo NUEVO sobre
+  // la decisión en curso (mismo `liveAdviceEntry` que usa "Coach IA" arriba,
+  // independiente de si el panel "Ayuda" está abierto), si la voz está
+  // activada se lee (lectura + recomendación, ver buildCoachSpokenText).
+  // `speak()` ya corta cualquier lectura anterior antes de empezar — nunca
+  // se solapan dos voces.
+  useEffect(() => {
+    if (!voiceEnabled || !liveAdviceEntry) return;
+    if (lastSpokenAdviceIdRef.current === liveAdviceEntry.id) return;
+    lastSpokenAdviceIdRef.current = liveAdviceEntry.id;
+    speak(buildCoachSpokenText(liveAdviceEntry));
+  }, [voiceEnabled, liveAdviceEntry]);
+
+  // Apagar la voz corta cualquier lectura en curso al instante (el propio
+  // toggle ya llama a stopSpeaking() en lib/speech.js; esto solo sincroniza
+  // el botón "Parar lectura" de AiCoachPanel con ese corte).
+  useEffect(() => {
+    if (!voiceEnabled) setAiSpeaking(false);
+  }, [voiceEnabled]);
+
   // Racha EN VIVO de esta partida (para el badge del HUD) — el total/nivel
   // acumulado en sí vive en `pointsProgress` (bancado en tiempo real por
   // hooks/usePointsProgress.js, una única instancia a nivel de página).
@@ -132,12 +179,21 @@ export default function HandTable({
   const askAi = useCallback(async () => {
     const entry = liveAdviceEntry;
     if (!entry || !view.hand_id) return;
+    // Volver a preguntar (o preguntar por primera vez) corta cualquier
+    // lectura en curso — evita que la respuesta VIEJA siga sonando por
+    // encima del nuevo "Pensando…" (aunque speak() también corta al
+    // empezar, esto lo hace ya mismo, sin esperar a la respuesta nueva).
+    stopSpeaking();
+    setAiSpeaking(false);
     const villainSummary = entry.villainName ? summarizePlayer(handHistory, entry.villainName) : null;
     const villainStyle = villainStyleText(villainSummary);
     setAiByEntryId((prev) => ({ ...prev, [entry.id]: { status: "loading" } }));
     try {
       const data = await fetchTableCoachAi(view.hand_id, villainStyle);
       setAiByEntryId((prev) => ({ ...prev, [entry.id]: { status: "done", text: data.text } }));
+      if (voiceEnabled) {
+        speak(data.text, { onStart: () => setAiSpeaking(true), onEnd: () => setAiSpeaking(false) });
+      }
     } catch (e) {
       setAiByEntryId((prev) => ({
         ...prev,
@@ -147,7 +203,12 @@ export default function HandTable({
         },
       }));
     }
-  }, [liveAdviceEntry, view.hand_id, handHistory]);
+  }, [liveAdviceEntry, view.hand_id, handHistory, voiceEnabled]);
+
+  const stopAiSpeaking = useCallback(() => {
+    stopSpeaking();
+    setAiSpeaking(false);
+  }, []);
 
   // Detectan las transiciones false->true de "es tu turno" y "mano
   // terminada" (via refs, no state) para disparar cada sonido UNA sola vez
@@ -255,6 +316,20 @@ export default function HandTable({
             >
               <Sparkles className="w-3.5 h-3.5" /> Coach IA
             </button>
+            {voiceSupported && (
+              <button
+                type="button"
+                data-testid={PLAY.voiceToggleBtn}
+                aria-pressed={voiceEnabled}
+                title={voiceEnabled ? "Desactivar voz del coach" : "Activar voz del coach (lee el análisis en alto)"}
+                onClick={toggleVoice}
+                className={`p-1.5 rounded-lg transition-colors ${
+                  voiceEnabled ? "text-[#8B5CF6]" : "text-[#94A3B8] hover:text-white"
+                }`}
+              >
+                {voiceEnabled ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+              </button>
+            )}
             <button
               type="button"
               data-testid={PLAY.soundToggleBtn}
@@ -300,6 +375,8 @@ export default function HandTable({
               canAsk={!!liveAdviceEntry}
               aiState={aiState}
               onAsk={askAi}
+              speaking={aiSpeaking}
+              onStopSpeaking={stopAiSpeaking}
               className="hidden lg:flex lg:flex-col w-56 shrink-0 glass-panel rounded-2xl p-3 overflow-y-auto"
             />
           )}

@@ -14,7 +14,7 @@ const RECOMMENDATION_STYLES = {
   green: { border: "border-[#10B981]/40", bg: "bg-[#10B981]/10", text: "text-[#10B981]" },
 };
 
-function recommendationLabel(rec) {
+export function recommendationLabel(rec) {
   if (rec.es_marginal) return "DECISIÓN MARGINAL";
   switch (rec.accion_sugerida) {
     case "fold":
@@ -87,6 +87,12 @@ function buildNavigableSlides(coachAdviceLog, handHistory) {
  * guarda su respuesta. `villainStyleText` (exportada más abajo) la reutiliza
  * tanto esta vista como el panel de la derecha para describir el estilo del
  * rival, sin duplicar el formateo del texto.
+ *
+ * Lectura por voz (lib/speech.js): HandTable.jsx dispara la lectura del
+ * coach v1 de forma independiente de si ESTE panel está abierto o cerrado
+ * (igual que ya hace con "Coach IA" — ver `liveAdviceEntry` ahí), así que
+ * reutiliza `readingText`/`recommendationLabel` (exportadas más abajo) para
+ * construir el texto a leer sin duplicar ese criterio.
  */
 export default function CoachPanel({ active, coachAdviceLog, handHistory }) {
   const slides = useMemo(() => buildNavigableSlides(coachAdviceLog, handHistory), [coachAdviceLog, handHistory]);
@@ -210,8 +216,11 @@ function situationText(entry) {
   return `Mano ${entry.handNumber} · Estás ${positionWord(entry)}, ${streetWord}. El bote va por ${entry.potTotal}. ${toCallText}`;
 }
 
-/** 5) Una lectura que ata pot odds/equity/breakeven — sin imponer la jugada. */
-function readingText(entry) {
+/** 5) Una lectura que ata pot odds/equity/breakeven — sin imponer la jugada.
+ * Exportada: también la usa la lectura por voz del coach (HandTable.jsx,
+ * ver lib/speech.js) para construir el texto que se lee en alto —
+ * "prioriza la lectura y la recomendación final", no todos los números. */
+export function readingText(entry) {
   const eq = entry.equity;
   if (entry.toCall > 0) {
     if (!eq) return "No se pudo estimar tu equity para compararla con lo que pide el bote.";
