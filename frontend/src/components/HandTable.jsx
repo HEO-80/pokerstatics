@@ -1,10 +1,12 @@
-import { useState } from "react";
-import { Trophy, HelpCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Trophy, HelpCircle, Volume2, VolumeX } from "lucide-react";
 import PlayTable from "./PlayTable";
 import PlayActionBar from "./PlayActionBar";
 import ActivityLog from "./ActivityLog";
+import TurnTimer from "./TurnTimer";
 import { PLAY } from "@/constants/testIds";
 import { groupPotResults, formatPotGroupText, collectHighlightedCards } from "@/lib/potResults";
+import { useSoundPreference, playYourTurn, playWin, playLose } from "@/lib/sound";
 
 const TABLE_ROW_HEIGHT = "440px";
 
@@ -42,8 +44,34 @@ export default function HandTable({
   totalSeats,
 }) {
   const [helpOpen, setHelpOpen] = useState(false);
+  const [soundEnabled, toggleSound] = useSoundPreference();
   const potGroups = view.finished ? groupPotResults(view.winners_by_pot) : [];
   const highlightedCards = view.finished ? collectHighlightedCards(view.winners_by_pot) : null;
+
+  // Detectan las transiciones false->true de "es tu turno" y "mano
+  // terminada" (via refs, no state) para disparar cada sonido UNA sola vez
+  // por evento — sin esto, cada re-render mientras `view.is_hero_turn` sigue
+  // en true (p.ej. al escribir en el input de raise) volvería a sonar.
+  // HandTable permanece montado durante toda la sesión (Práctica/Torneo/
+  // Sit&Go nunca lo desmontan entre manos), así que los refs cubren la
+  // partida entera; cada mano nueva pasa por `is_hero_turn`/`finished` en
+  // false antes de volver a true, así que la detección no se "engancha".
+  const prevHeroTurnRef = useRef(false);
+  const prevFinishedRef = useRef(false);
+
+  useEffect(() => {
+    if (view.is_hero_turn && !view.finished && !prevHeroTurnRef.current) playYourTurn();
+    prevHeroTurnRef.current = view.is_hero_turn;
+  }, [view.is_hero_turn, view.finished]);
+
+  useEffect(() => {
+    if (view.finished && !prevFinishedRef.current) {
+      const heroWon = (view.winners_by_pot || []).some((pot) => pot.winners.includes(view.hero_seat));
+      if (heroWon) playWin();
+      else playLose();
+    }
+    prevFinishedRef.current = view.finished;
+  }, [view.finished, view.winners_by_pot, view.hero_seat]);
 
   return (
     <div className="flex gap-4">
@@ -70,7 +98,7 @@ export default function HandTable({
       </div>
 
       <div className="flex-1 min-w-0 flex flex-col gap-2.5">
-        <div className="shrink-0 flex items-center justify-center gap-2 text-xs md:text-sm text-[#94A3B8] font-mono-poker">
+        <div className="shrink-0 relative flex items-center justify-center gap-2 text-xs md:text-sm text-[#94A3B8] font-mono-poker">
           <span
             className={`w-1.5 h-1.5 rounded-full ${
               view.finished ? "bg-[#475569]" : view.is_hero_turn ? "bg-[#10B981] animate-pulse" : "bg-[#F59E0B]"
@@ -83,6 +111,16 @@ export default function HandTable({
               · Ciegas {view.sb}/{view.bb}
             </span>
           )}
+          <button
+            type="button"
+            data-testid={PLAY.soundToggleBtn}
+            aria-pressed={!soundEnabled}
+            title={soundEnabled ? "Silenciar sonido" : "Activar sonido"}
+            onClick={toggleSound}
+            className="absolute right-0 p-1.5 rounded-lg text-[#94A3B8] hover:text-white transition-colors"
+          >
+            {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+          </button>
         </div>
 
         <div className="shrink-0 flex gap-4" style={{ height: TABLE_ROW_HEIGHT }}>
@@ -128,13 +166,18 @@ export default function HandTable({
               {finishedActions}
             </div>
           ) : (
-            <PlayActionBar
-              legalActions={view.legal_actions}
-              potTotal={view.pot_total}
-              currentBet={view.current_bet}
-              onAction={onAction}
-              disabled={loading || !view.is_hero_turn}
-            />
+            <div className="space-y-2">
+              {view.is_hero_turn && !loading && (
+                <TurnTimer legalActions={view.legal_actions} onAction={onAction} />
+              )}
+              <PlayActionBar
+                legalActions={view.legal_actions}
+                potTotal={view.pot_total}
+                currentBet={view.current_bet}
+                onAction={onAction}
+                disabled={loading || !view.is_hero_turn}
+              />
+            </div>
           )}
         </div>
       </div>

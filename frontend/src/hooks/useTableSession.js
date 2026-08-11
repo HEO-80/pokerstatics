@@ -7,6 +7,9 @@ import { seatName } from "@/lib/table";
 import { createHandRecord, boardStreetsFromCards, mergeBoardStreets } from "@/lib/handHistory";
 import { groupPotResults, formatPotGroupText } from "@/lib/potResults";
 import { loadHandHistory, saveHandHistory, clearHandHistory } from "@/lib/handHistoryStorage";
+import { playDeal, playChip } from "@/lib/sound";
+
+const CHIP_SOUND_ACTIONS = new Set(["call", "raise", "all_in"]);
 
 /**
  * Estado + orquestación compartida por Práctica, Torneo y Sit & Go: crear una
@@ -83,6 +86,7 @@ export function useTableSession(storageKey) {
     (entry, { isHero }) => {
       const name = resolveNameRef.current(entry.seat);
       const fullEntry = { ...entry, name, isHero: !!isHero };
+      if (CHIP_SOUND_ACTIONS.has(entry.action)) playChip();
       updateCurrentHand((hand) => ({ ...hand, actions: [...hand.actions, fullEntry] }));
     },
     [updateCurrentHand],
@@ -221,6 +225,7 @@ export function useTableSession(storageKey) {
         });
 
         setDealing(true);
+        playDeal();
         const skipSignal = createSkipSignal();
         skipSignalRef.current = skipSignal;
         await waitOrSkip(dealTotalDuration(initialPlayers.length), skipSignal);
