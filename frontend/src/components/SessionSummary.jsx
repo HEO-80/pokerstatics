@@ -49,21 +49,20 @@ export default function SessionSummary({ coachAdviceLog, handsPlayed, resultLine
         )}
       </div>
 
-      {(summary.exampleWonWithBadDecision || summary.exampleLostWithGoodDecision) && (
+      {summary.notableHands.length > 0 && (
         <div className="space-y-1.5">
           <div className="text-[10px] uppercase tracking-widest text-[#475569]">Resultado vs. decisión</div>
-          {summary.exampleWonWithBadDecision && (
-            <div className="text-[#F59E0B]">
-              Mano {summary.exampleWonWithBadDecision.handNumber}: ganaste el bote, pero la decisión era -EV
-              según el coach — salió bien esta vez; a largo plazo, ese tipo de jugada pierde.
+          {summary.notableHands.map((h) => (
+            <div key={h.handNumber} className={h.noteType === "wonWithBadDecision" ? "text-[#F59E0B]" : "text-[#94A3B8]"}>
+              <strong>
+                Mano {h.handNumber} de {handsPlayed}
+              </strong>
+              :{" "}
+              {h.noteType === "wonWithBadDecision"
+                ? "ganaste el bote, pero la decisión era -EV según el coach — salió bien esta vez; a largo plazo, ese tipo de jugada pierde."
+                : "perdiste el bote, pero la decisión era +EV según el coach — buena decisión, aunque esa mano en concreto se perdiera."}
             </div>
-          )}
-          {summary.exampleLostWithGoodDecision && (
-            <div className="text-[#94A3B8]">
-              Mano {summary.exampleLostWithGoodDecision.handNumber}: perdiste el bote, pero la decisión era +EV
-              según el coach — buena decisión, aunque esa mano en concreto se perdiera.
-            </div>
-          )}
+          ))}
         </div>
       )}
 

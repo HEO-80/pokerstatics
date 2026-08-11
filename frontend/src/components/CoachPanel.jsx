@@ -345,7 +345,7 @@ function CoachAdviceEntryView({ entry, handHistory }) {
           </div>
           <div className="text-[#94A3B8] mt-1">{entry.recommendation.explicacion}</div>
           {entry.recommendation.raise_size_rationale && (
-            <div className="text-[#475569] text-xs mt-1.5">{entry.recommendation.raise_size_rationale}</div>
+            <div className="text-[#FCD34D] text-xs font-medium mt-1.5">{entry.recommendation.raise_size_rationale}</div>
           )}
           {outcomeText(entry) && <div className="text-[#475569] text-xs mt-1.5">{outcomeText(entry)}</div>}
           <div className="text-[10px] text-[#475569] mt-1.5">Esto es orientativo — la decisión final siempre es tuya.</div>

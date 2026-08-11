@@ -87,8 +87,11 @@ export function summarizeSession(coachAdviceLog) {
     wonWithBadDecision: 0,
     lostWithBadDecision: 0,
   };
-  let exampleWonWithBadDecision = null; // primer caso: ganaste la mano, decisión -EV
-  let exampleLostWithGoodDecision = null; // primer caso: perdiste la mano, decisión +EV
+  // Candidatas a "mano notable" (ver más abajo): TODAS las que ganaste con
+  // -EV o perdiste con +EV, no solo la primera — se filtran/ordenan después
+  // de recorrer el log entero.
+  const wonWithBadCandidates = [];
+  const lostWithGoodCandidates = [];
 
   entries.forEach((entry) => {
     const verdict = decisionVerdict(entry);
@@ -110,13 +113,35 @@ export function summarizeSession(coachAdviceLog) {
       if (verdict === "correct" && entry.heroWonHand) resultVsDecision.wonWithGoodDecision += 1;
       else if (verdict === "correct" && !entry.heroWonHand) {
         resultVsDecision.lostWithGoodDecision += 1;
-        exampleLostWithGoodDecision = exampleLostWithGoodDecision ?? entry;
+        lostWithGoodCandidates.push(entry);
       } else if (verdict === "incorrect" && entry.heroWonHand) {
         resultVsDecision.wonWithBadDecision += 1;
-        exampleWonWithBadDecision = exampleWonWithBadDecision ?? entry;
+        wonWithBadCandidates.push(entry);
       } else if (verdict === "incorrect" && !entry.heroWonHand) resultVsDecision.lostWithBadDecision += 1;
     }
   });
+
+  // "Manos notables" para citar en el resumen (Tarea: no solo un ejemplo,
+  // hasta 3, priorizando bote más grande): dedupe por handNumber (una mano
+  // puede tener varias decisiones que califican, solo se cita una vez, la de
+  // mayor bote) y ordena de mayor a menor `potTotal` -- es el número más
+  // fiable que ya viaja en cada entrada para aproximar "la mano más
+  // relevante" sin tener que ir a buscar el bote final a handHistory.
+  const byPotDesc = (a, b) => (b.potTotal ?? 0) - (a.potTotal ?? 0);
+  const dedupeByHand = (list) => {
+    const seen = new Set();
+    const out = [];
+    for (const e of [...list].sort(byPotDesc)) {
+      if (seen.has(e.handNumber)) continue;
+      seen.add(e.handNumber);
+      out.push(e);
+    }
+    return out;
+  };
+  const notableHands = [
+    ...dedupeByHand(wonWithBadCandidates).map((entry) => ({ handNumber: entry.handNumber, entry, noteType: "wonWithBadDecision" })),
+    ...dedupeByHand(lostWithGoodCandidates).map((entry) => ({ handNumber: entry.handNumber, entry, noteType: "lostWithGoodDecision" })),
+  ].slice(0, 3);
 
   const withVerdict = correct + incorrect; // sin contar marginales, que no son ni acierto ni fallo
   const totalDecisionsWithData = withVerdict + marginal;
@@ -141,8 +166,7 @@ export function summarizeSession(coachAdviceLog) {
     marginal,
     correctPct: withVerdict > 0 ? Math.round((correct / withVerdict) * 1000) / 10 : null,
     resultVsDecision,
-    exampleWonWithBadDecision,
-    exampleLostWithGoodDecision,
+    notableHands,
     patterns,
   };
 }

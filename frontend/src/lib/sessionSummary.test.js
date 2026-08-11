@@ -10,6 +10,7 @@ function entry({
   heroAction,
   handFinished = false,
   heroWonHand = null,
+  potTotal = 0,
 }) {
   return {
     handNumber,
@@ -18,6 +19,7 @@ function entry({
     heroAmount: null,
     handFinished,
     heroWonHand,
+    potTotal,
   };
 }
 
@@ -109,8 +111,29 @@ describe("summarizeSession", () => {
       wonWithBadDecision: 1,
       lostWithBadDecision: 1,
     });
-    expect(summary.exampleLostWithGoodDecision.handNumber).toBe(1);
-    expect(summary.exampleWonWithBadDecision.handNumber).toBe(2);
+    expect(summary.notableHands.map((h) => h.handNumber)).toEqual([2, 1]);
+    expect(summary.notableHands.find((h) => h.handNumber === 2).noteType).toBe("wonWithBadDecision");
+    expect(summary.notableHands.find((h) => h.handNumber === 1).noteType).toBe("lostWithGoodDecision");
+  });
+
+  it("cita hasta 3 manos notables, sin repetir mano y ordenadas por bote de mayor a menor", () => {
+    const log = [
+      entry({ handNumber: 1, accion_sugerida: "fold", heroAction: "call", handFinished: true, heroWonHand: true, potTotal: 50 }),
+      // Segunda decisión -EV EN LA MISMA mano 1 (bote más chico en ese
+      // instante) -> no debe duplicar la mano 1 en notableHands.
+      entry({ handNumber: 1, accion_sugerida: "fold", heroAction: "call", handFinished: true, heroWonHand: true, potTotal: 30 }),
+      entry({ handNumber: 2, accion_sugerida: "fold", heroAction: "call", handFinished: true, heroWonHand: true, potTotal: 200 }),
+      entry({ handNumber: 3, accion_sugerida: "fold", heroAction: "call", handFinished: true, heroWonHand: true, potTotal: 10 }),
+      entry({ handNumber: 4, accion_sugerida: "call", heroAction: "call", handFinished: true, heroWonHand: false, potTotal: 999 }),
+    ];
+
+    const summary = summarizeSession(log);
+
+    // Máximo 3, sin repetir la mano 1, la de mayor bote (mano 2, 200)
+    // primero dentro de su categoría; la 4ª candidata (mano 4) se descarta
+    // por el tope de 3.
+    expect(summary.notableHands).toHaveLength(3);
+    expect(summary.notableHands.map((h) => h.handNumber)).toEqual([2, 1, 3]);
   });
 
   it("no cuenta resultado si la mano todavía no ha terminado", () => {
