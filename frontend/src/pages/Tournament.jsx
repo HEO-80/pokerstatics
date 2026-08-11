@@ -1,30 +1,53 @@
 import { useCallback, useRef, useState } from "react";
-import { Swords, RotateCw, LogOut, Skull, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
+import { Swords, RotateCw, LogOut, Skull, TrendingUp, Trophy, Users } from "lucide-react";
 import HandTable from "@/components/HandTable";
 import ActivityLog from "@/components/ActivityLog";
 import SessionSummary from "@/components/SessionSummary";
-import { createTableHand } from "@/lib/api";
+import { createTableHand, simulateMttRound } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { TOURNAMENT } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
 import { pickRandomNames } from "@/lib/playerNames";
+import { sampleFieldStack, createNamePool } from "@/lib/mtt";
 
-// Modo Torneo — ESQUELETO MÍNIMO: una sola mesa, sin mesas paralelas, sin
-// ICM y sin ranking. La única diferencia real con Práctica es que el stack
-// de TODOS los asientos (hero y bots) se arrastra de una mano a la siguiente
-// vía el override `stacks` de POST /table/new, hasta que el hero se queda a
-// 0 (Eliminado). Los bots nunca se eliminan de la mesa: si se quedan a 0
-// simplemente siguen sentados (all-in a la fuerza) — por eso el nº de
-// asientos (cfg.numPlayers) es constante durante toda la partida, a
-// diferencia de Sit&Go, y la "vuelta del botón" para subir de nivel de
-// ciegas (ver lib/blindLevels.js) siempre dura lo mismo: cfg.numPlayers
-// manos.
+// Modo Torneo — MTT de verdad (100/500/1000 inscritos), hasta la mesa final.
+//
+// CLAVE DE DISEÑO: el hero juega su mesa de 9 DE VERDAD (misma mecánica de
+// mesa/ciegas que Sit&Go: asientos fijos, quien llega a 0 se va de la mesa,
+// se reparte con los supervivientes). El RESTO del campo (todo lo que no es
+// la mesa del hero) NO se juega mano a mano — es inviable simular 1000
+// personas — se lleva como un simple contador (`fieldPoolRef`) que baja cada
+// ronda según un modelo estadístico agregado que vive en el BACKEND
+// (backend/mtt_simulation.py, expuesto vía POST /api/mtt/round — ver
+// simulateMttRound en lib/api.js), con tests en pytest. Este archivo no
+// decide CUÁNTA gente cae en el campo, solo aplica el número que devuelve el
+// backend.
+//
+// "Juntar mesas": cada vez que un asiento de la mesa del hero queda libre
+// (alguien real se fue a 0) y todavía queda campo, se sienta ahí un
+// superviviente SIMULADO (nombre nuevo, stack ~ la media del campo — ver
+// lib/mtt.js) en vez de dejar la mesa corta. Así la mesa del hero se
+// mantiene llena mientras haya campo del que tirar (igual que el balanceo de
+// mesas de un MTT real) y solo empieza a encogerse de verdad cuando el campo
+// se agota — momento en el que, por construcción, se ha llegado a la mesa
+// final (<=9 supervivientes en total, mesa del hero incluida).
+//
+// INVARIANTE que mantiene todo el modelo, ronda a ronda:
+//   remainingRef.current === (asientos ocupados en la mesa del hero) + fieldPoolRef.current
+// Los busts reales de la mesa del hero bajan el primer sumando; el modelo
+// del backend baja fieldPoolRef; "juntar mesas" solo MUEVE una unidad del
+// segundo sumando al primero (remainingRef no cambia). Por eso nunca hace
+// falta reconciliar nada aparte: basta con no romper la invariante en cada
+// paso.
 const HERO_SEAT = 0;
+const TOTAL_SEATS = 9;
+const ENTRANTS_OPTIONS = [100, 500, 1000];
 
 const LOBBY_DEFAULTS = {
   heroName: "",
-  opponents: 5,
+  totalEntrants: 100,
   startingStack: 100,
   startLevel: 1,
 };
@@ -33,26 +56,43 @@ const fieldClass =
   "w-full bg-[#0F1115] border border-white/12 rounded-lg px-3 py-2 text-white text-sm font-mono-poker focus:outline-none focus:border-[#3B82F6]";
 
 export default function Tournament() {
-  const [phase, setPhase] = useState("lobby"); // lobby | playing | eliminated | exited
+  const [phase, setPhase] = useState("lobby"); // lobby | playing | eliminated | won | exited
   const [lobby, setLobby] = useState(LOBBY_DEFAULTS);
   const [config, setConfig] = useState(null);
   const [buttonSeat, setButtonSeat] = useState(0);
+  const [computingRound, setComputingRound] = useState(false);
+  const [remaining, setRemaining] = useState(0);
+  const [avgStack, setAvgStack] = useState(0);
+  const [estimatedPosition, setEstimatedPosition] = useState(null);
+  const [finalPosition, setFinalPosition] = useState(null);
+  const [roundPhase, setRoundPhase] = useState("early"); // early|mid|bubble|final_table, del último /mtt/round
+
   // null = "todavía no se ha jugado ninguna mano de esta partida" -> el
-  // próximo dealHand() debe elegir un botón al azar (en vez del hardcode a 0
-  // que hacía que el hero, sentado siempre en el asiento 0, fuera SIEMPRE el
-  // dealer inicial). Una vez hay un valor, rota normalmente (+1 por mano).
+  // próximo dealHand() debe elegir un botón al azar. Una vez hay un valor,
+  // rota normalmente (+1 por mano), igual que Sit&Go/Torneo clásico.
   const nextButtonRef = useRef(null);
-  // Nivel de ciegas actual + nº de manos jugadas en él, ver lib/blindLevels.js.
-  // Igual que nextButtonRef, vive en un ref para tener el valor síncrono
-  // disponible al construir la llamada a createTableHand; levelInfo (state)
-  // es solo el espejo para pintar el HUD.
   const levelTrackerRef = useRef(createLevelTracker());
   const [levelInfo, setLevelInfo] = useState(createLevelTracker());
-  // Nombre persistente por asiento (slot 0 = hero), fijado una vez al
-  // empezar el torneo. A diferencia de Sit&Go, aquí el asiento de backend
-  // nunca se renumera (los bots eliminados se quedan sentados a 0), así que
-  // no hace falta ninguna traducción de posición — solo el nombre.
-  const rosterRef = useRef([]);
+
+  // Estado del torneo MTT (ver invariante en el comentario de cabecera).
+  const totalEntrantsRef = useRef(0);
+  const startingStackRef = useRef(0);
+  const remainingRef = useRef(0);
+  const fieldPoolRef = useRef(0);
+  const avgStackRef = useRef(0);
+  const bubbleAnnouncedRef = useRef(false);
+  const finalTableAnnouncedRef = useRef(false);
+  const namePoolRef = useRef(createNamePool([]));
+
+  // Nombre ACTUAL de cada una de las 9 sillas físicas de la mesa del hero
+  // (silla 0 = hero, fija toda la partida). A diferencia de Sit&Go, esto SÍ
+  // se reescribe en marcha: cuando un superviviente simulado se sienta en
+  // una silla que quedó libre, esa silla pasa a tener un nombre nuevo.
+  const chairNamesRef = useRef([]);
+  // Asiento de backend de ESTA mano -> silla física persistente (0-8) —
+  // mismo mecanismo de traducción que Sit&Go (aliveSlotsRef), pero aquí las
+  // sillas no desaparecen al vaciarse: se rellenan (ver nextHand).
+  const aliveSlotsRef = useRef([]);
   const {
     view,
     handHistory,
@@ -66,40 +106,31 @@ export default function Tournament() {
     dealAnimated,
     actionAnimated,
   } = useTableSession("tournament");
-  // El asiento de backend nunca se renumera en Torneo, así que traducir a un
-  // nombre persistente es trivial: rosterRef[seat], con fallback al nombre
-  // crudo del backend por si acaso (no debería hacer falta).
-  const getPlayerName = useCallback(
-    (seat, players) => rosterRef.current[seat] ?? seatName(players, seat),
-    [],
-  );
+
+  const getPlayerName = useCallback((seat, players) => {
+    const chair = aliveSlotsRef.current[seat] ?? seat;
+    return chairNamesRef.current[chair] ?? seatName(players, seat);
+  }, []);
 
   const dealHand = useCallback(
-    async (cfg, stacksBySeat, tracker) => {
+    async (cfg, numPlayers, stacksBySeat, tracker) => {
       const button =
         nextButtonRef.current === null
-          ? Math.floor(Math.random() * cfg.numPlayers)
-          : nextButtonRef.current % cfg.numPlayers;
+          ? Math.floor(Math.random() * numPlayers)
+          : nextButtonRef.current % numPlayers;
       nextButtonRef.current = button + 1;
       levelTrackerRef.current = tracker;
       setLevelInfo(tracker);
       const blinds = blindsForLevel(tracker.level);
-      // Fijar el botón y pasar a "playing" ANTES de llamar a dealAnimated (no
-      // después, como estaba): dealAnimated no resuelve hasta que termina TODO
-      // el reparto animado + la reproducción de las acciones de los bots, así
-      // que si se esperaba a que resolviera para mostrar la mesa, esa
-      // animación entera ocurría "a ciegas" con el lobby todavía en pantalla
-      // (de ahí que la primera mano no se viera repartir y que la app
-      // pareciera congelada un rato tras pulsar "Empezar").
       setButtonSeat(button);
       setPhase("playing");
       const stacks = stacksBySeat || Object.fromEntries(
-        Array.from({ length: cfg.numPlayers }, (_, s) => [s, cfg.startingStack]),
+        Array.from({ length: numPlayers }, (_, s) => [s, cfg.startingStack]),
       );
       const data = await dealAnimated(
         () =>
           createTableHand({
-            num_players: cfg.numPlayers,
+            num_players: numPlayers,
             starting_stack: cfg.startingStack,
             sb: blinds.sb,
             bb: blinds.bb,
@@ -126,37 +157,123 @@ export default function Tournament() {
 
   const startTournament = (e) => {
     e.preventDefault();
-    // Una partida NUEVA no debe arrastrar el historial de la anterior —
-    // reset() también limpia lo persistido en localStorage (ver
-    // useTableSession.js), así que esto cubre tanto "empezar tras salir"
-    // como "recargué la página a media partida y ahora empiezo otra".
     reset();
-    const cfg = {
-      numPlayers: Number(lobby.opponents) + 1,
-      startingStack: Number(lobby.startingStack),
-    };
+    const totalEntrants = Number(lobby.totalEntrants);
+    const startingStack = Number(lobby.startingStack);
     const heroName = lobby.heroName.trim() || "Hero";
-    const botNames = pickRandomNames(cfg.numPlayers - 1);
-    rosterRef.current = Array.from({ length: cfg.numPlayers }, (_, seat) =>
-      seat === HERO_SEAT ? heroName : botNames.shift(),
-    );
+    // Un pool de nombres para TODA la partida: los 8 primeros arrancan
+    // sentados como rivales, el resto se reserva para ir sentando
+    // supervivientes simulados según se rellenan huecos (ver nextHand). Con
+    // torneos de hasta 1000 inscritos y ~96 nombres de pila disponibles, el
+    // pool se agota mucho antes del final — createNamePool cae a
+    // "JugadorN" a partir de ahí (ver lib/mtt.js).
+    const namesForGame = pickRandomNames(96);
+    chairNamesRef.current = [heroName, ...namesForGame.slice(0, TOTAL_SEATS - 1)];
+    namePoolRef.current = createNamePool(namesForGame.slice(TOTAL_SEATS - 1));
+    aliveSlotsRef.current = Array.from({ length: TOTAL_SEATS }, (_, i) => i);
+
+    totalEntrantsRef.current = totalEntrants;
+    startingStackRef.current = startingStack;
+    remainingRef.current = totalEntrants;
+    fieldPoolRef.current = Math.max(0, totalEntrants - TOTAL_SEATS);
+    avgStackRef.current = startingStack;
+    bubbleAnnouncedRef.current = false;
+    finalTableAnnouncedRef.current = false;
+    setRemaining(totalEntrants);
+    setAvgStack(startingStack);
+    setEstimatedPosition(null);
+    setFinalPosition(null);
+    setRoundPhase("early");
+
+    const cfg = { startingStack, totalEntrants };
     setConfig(cfg);
     nextButtonRef.current = null;
-    const allowedLevels = allowedStartLevels(cfg.startingStack);
+    const allowedLevels = allowedStartLevels(startingStack);
     const startLevel = allowedLevels.includes(Number(lobby.startLevel)) ? Number(lobby.startLevel) : 1;
-    dealHand(cfg, null, createLevelTracker(startLevel));
+    dealHand(cfg, TOTAL_SEATS, null, createLevelTracker(startLevel));
   };
 
-  const nextHand = () => {
+  const nextHand = async () => {
     if (!view || !config) return;
-    const stacksBySeat = {};
-    view.players.forEach((p) => {
-      stacksBySeat[String(p.seat)] = p.stack;
-    });
-    // cfg.numPlayers es constante en Torneo (los bots nunca se quitan de la
-    // mesa), así que la vuelta del botón siempre dura cfg.numPlayers manos.
-    const tracker = advanceLevelTracker(levelTrackerRef.current, config.numPlayers);
-    dealHand(config, stacksBySeat, tracker);
+    setComputingRound(true);
+    try {
+      // 1) Supervivientes REALES de la mano que se acaba de jugar, ya
+      // traducidos a su silla física persistente.
+      const aliveChairs = new Map();
+      view.players.forEach((p) => {
+        if (p.stack > 0) aliveChairs.set(aliveSlotsRef.current[p.seat], p.stack);
+      });
+      const heroSurvived = aliveChairs.has(0);
+      const bustsThisHand = view.players.length - aliveChairs.size;
+      const remainingAtHandStart = remainingRef.current;
+      remainingRef.current = Math.max(0, remainingRef.current - bustsThisHand);
+
+      if (!heroSurvived) {
+        // El hero se queda a 0. Su puesto final es cuántos quedaban en pie
+        // al EMPEZAR esta mano (todos los que siguen vivos, en su mesa o en
+        // el campo, terminan por delante del hero).
+        setFinalPosition(remainingAtHandStart);
+        setRemaining(remainingRef.current);
+        setPhase("eliminated");
+        return;
+      }
+
+      // 2) Ronda del modelo de eliminación del campo (backend). Se llama
+      // siempre que el hero sigue vivo (incluso ya en mesa final: el
+      // backend simplemente devuelve 0 eliminados ahí, pero de paso
+      // refresca stack medio / posición estimada para el HUD).
+      const heroStack = aliveChairs.get(0);
+      const round = await simulateMttRound({
+        totalEntrants: totalEntrantsRef.current,
+        remainingTotal: remainingRef.current,
+        fieldPool: fieldPoolRef.current,
+        startingStack: startingStackRef.current,
+        heroStack,
+      });
+      fieldPoolRef.current = round.field_pool_after;
+      remainingRef.current = round.remaining_total_after;
+      avgStackRef.current = round.avg_stack;
+      setAvgStack(round.avg_stack);
+      setEstimatedPosition(round.estimated_rank);
+      setRoundPhase(round.phase);
+
+      if (round.is_bubble && !bubbleAnnouncedRef.current) {
+        bubbleAnnouncedRef.current = true;
+        toast.message("¡Burbuja! Cerca de premios — el ritmo de eliminación se frena.");
+      }
+      if (round.is_final_table && !finalTableAnnouncedRef.current) {
+        finalTableAnnouncedRef.current = true;
+        toast.success(`¡Mesa final! Quedan ${round.remaining_total_after} jugadores.`);
+      }
+
+      // 3) "Juntar mesas": rellenar cada silla libre de la mesa del hero con
+      // un superviviente simulado, mientras quede campo del que tirar.
+      for (let chair = 0; chair < TOTAL_SEATS; chair++) {
+        if (!aliveChairs.has(chair) && fieldPoolRef.current > 0) {
+          chairNamesRef.current[chair] = namePoolRef.current.next();
+          aliveChairs.set(chair, sampleFieldStack(avgStackRef.current));
+          fieldPoolRef.current -= 1;
+        }
+      }
+
+      const orderedChairs = [...aliveChairs.keys()].sort((a, b) => a - b);
+      const stacks = {};
+      orderedChairs.forEach((chair, i) => {
+        stacks[String(i)] = aliveChairs.get(chair);
+      });
+      aliveSlotsRef.current = orderedChairs;
+      setRemaining(remainingRef.current);
+
+      if (orderedChairs.length === 1 && fieldPoolRef.current === 0) {
+        setPhase("won");
+        return;
+      }
+
+      const tracker = advanceLevelTracker(levelTrackerRef.current, orderedChairs.length);
+      await dealHand(config, orderedChairs.length, stacks, tracker);
+    } finally {
+      setComputingRound(false);
+    }
   };
 
   const backToLobby = () => {
@@ -171,45 +288,36 @@ export default function Tournament() {
   };
 
   const roles = view ? seatRoles(view.players.length, buttonSeat) : null;
-  const heroStack = view?.players.find((p) => p.seat === HERO_SEAT)?.stack;
+  const heroStack = view?.players.find((p) => p.seat === HERO_SEAT)?.stack ?? 0;
 
-  // Niveles de la tabla que se pueden elegir como inicio con el stack actual
-  // del lobby (tope BB <= stack/2, ver lib/blindLevels.js). Se recalcula en
-  // cada render, así que cambiar el stack ya deja el selector al día solo.
   const lobbyAllowedLevels = allowedStartLevels(Number(lobby.startingStack) || 0);
 
-  // Igual que en Sit&Go: misma vista, con el nombre persistente del roster
-  // añadido a cada jugador (aquí el asiento nunca cambia de significado, así
-  // que no hace falta tocar la posición, solo el nombre).
   const displayView = view
-    ? { ...view, players: view.players.map((p) => ({ ...p, name: rosterRef.current[p.seat] ?? p.name })) }
+    ? {
+        ...view,
+        players: view.players.map((p) => {
+          const chair = aliveSlotsRef.current[p.seat] ?? p.seat;
+          return { ...p, visualSlot: chair, name: chairNamesRef.current[chair] ?? p.name };
+        }),
+      }
     : view;
 
+  const ROUND_PHASE_LABEL = { early: "Fase inicial", mid: "Mitad de torneo", bubble: "Burbuja", final_table: "Mesa final" };
+  const ROUND_PHASE_COLOR = { early: "#3B82F6", mid: "#F59E0B", bubble: "#EF4444", final_table: "#8B5CF6" };
+
   return (
-    <div data-testid={TOURNAMENT.screen} className="w-full px-3 sm:px-6 py-4">
-      <div className="flex items-center justify-between mb-3">
-        <h1 className="font-display font-bold text-2xl uppercase tracking-tight text-white">
-          Torneo
-        </h1>
+    <div data-testid={TOURNAMENT.screen} className="w-full px-3 sm:px-6 py-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] flex items-center justify-center shrink-0">
+            <Swords className="w-3.5 h-3.5 text-white" />
+          </div>
+          <h1 className="font-display font-bold text-sm uppercase tracking-tight text-white">
+            Torneo
+          </h1>
+        </div>
         {phase === "playing" && view && (
           <div className="flex items-center gap-4">
-            <div className="text-xs text-[#475569] font-mono-poker">
-              Tu stack: <span className="text-white font-bold">{heroStack}</span>
-            </div>
-            <div
-              data-testid={TOURNAMENT.levelBadge}
-              className="flex items-center gap-1.5 text-xs text-[#475569] font-mono-poker"
-            >
-              <TrendingUp className="w-3.5 h-3.5" />
-              Nivel <span className="text-white font-bold">{levelInfo.level}</span> · Ciegas{" "}
-              <span className="text-white font-bold">
-                {blindsForLevel(levelInfo.level).sb}/{blindsForLevel(levelInfo.level).bb}
-              </span>
-              <span className="text-[#475569]">
-                · Sube en {Math.max(1, (config?.numPlayers ?? 0) - levelInfo.handsAtLevel)} mano
-                {Math.max(1, (config?.numPlayers ?? 0) - levelInfo.handsAtLevel) === 1 ? "" : "s"}
-              </span>
-            </div>
             <button
               data-testid={TOURNAMENT.exitBtn}
               onClick={() => setPhase("exited")}
@@ -221,6 +329,51 @@ export default function Tournament() {
         )}
       </div>
 
+      {phase === "playing" && view && (
+        <div
+          data-testid={TOURNAMENT.hud}
+          className="glass-panel rounded-xl px-4 py-2.5 mb-2 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs md:text-sm font-mono-poker"
+        >
+          <div data-testid={TOURNAMENT.hudPlayers} className="flex items-center gap-1.5">
+            <Users className="w-3.5 h-3.5 text-[#94A3B8]" />
+            Jugadores: <span className="text-white font-bold">{remaining}</span>
+            <span className="text-[#475569]">/{config?.totalEntrants}</span>
+          </div>
+          <div className="text-[#94A3B8]">
+            Tu stack: <span className="text-white font-bold">{heroStack}</span>
+          </div>
+          <div className="text-[#94A3B8]">
+            Stack medio: <span className="text-white font-bold">{Math.round(avgStack)}</span>
+          </div>
+          <div data-testid={TOURNAMENT.hudPosition} className="text-[#94A3B8]">
+            Posición ~<span className="text-white font-bold">#{estimatedPosition ?? "—"}</span>
+          </div>
+          <div
+            className="flex items-center gap-1.5"
+            style={{ color: ROUND_PHASE_COLOR[roundPhase] }}
+          >
+            {ROUND_PHASE_LABEL[roundPhase]}
+          </div>
+          <div className="flex items-center gap-1.5 text-[#475569]">
+            <TrendingUp className="w-3.5 h-3.5" />
+            Nivel <span className="text-white font-bold">{levelInfo.level}</span> · Ciegas{" "}
+            <span className="text-white font-bold">
+              {blindsForLevel(levelInfo.level).sb}/{blindsForLevel(levelInfo.level).bb}
+            </span>
+          </div>
+          {roundPhase === "bubble" && (
+            <div data-testid={TOURNAMENT.bubbleBanner} className="text-[#EF4444] font-bold uppercase tracking-wide text-[10px]">
+              Burbuja
+            </div>
+          )}
+          {roundPhase === "final_table" && (
+            <div data-testid={TOURNAMENT.finalTableBanner} className="text-[#8B5CF6] font-bold uppercase tracking-wide text-[10px]">
+              Mesa final
+            </div>
+          )}
+        </div>
+      )}
+
       {phase === "lobby" && (
         <form
           data-testid={TOURNAMENT.lobby}
@@ -228,7 +381,8 @@ export default function Tournament() {
           className="glass-panel rounded-2xl p-6 grid grid-cols-2 md:grid-cols-4 gap-4 items-end max-w-2xl"
         >
           <div className="col-span-2 md:col-span-4 text-xs text-[#94A3B8]">
-            Ciegas iniciales{" "}
+            Torneo MTT: te sientas en una mesa real de 9 jugadores; el resto del campo se simula
+            estadísticamente (ver HUD "Posición ~#N" durante la partida). Ciegas iniciales{" "}
             <span className="text-white font-mono-poker font-bold">
               {blindsForLevel(lobby.startLevel).sb}/{blindsForLevel(lobby.startLevel).bb}
             </span>{" "}
@@ -249,15 +403,16 @@ export default function Tournament() {
           </label>
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">Rivales (2-8)</span>
+            <span className="text-[10px] uppercase tracking-widest text-[#475569]">Participantes</span>
             <select
-              value={lobby.opponents}
-              onChange={(e) => setLobby((l) => ({ ...l, opponents: e.target.value }))}
+              data-testid={TOURNAMENT.entrantsSelect}
+              value={lobby.totalEntrants}
+              onChange={(e) => setLobby((l) => ({ ...l, totalEntrants: e.target.value }))}
               className={fieldClass}
             >
-              {[2, 3, 4, 5, 6, 7, 8].map((n) => (
+              {ENTRANTS_OPTIONS.map((n) => (
                 <option key={n} value={n}>
-                  {n}
+                  {n} jugadores
                 </option>
               ))}
             </select>
@@ -340,11 +495,44 @@ export default function Tournament() {
         >
           <Skull className="w-16 h-16 text-[#EF4444] mx-auto mb-4" />
           <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-            Eliminado
+            Puesto {finalPosition} de {config?.totalEntrants}
           </div>
           <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
           <div className="mb-6 text-left">
-            <SessionSummary coachAdviceLog={coachAdviceLog} handsPlayed={handHistory.length} resultLine="Eliminado" />
+            <SessionSummary
+              coachAdviceLog={coachAdviceLog}
+              handsPlayed={handHistory.length}
+              resultLine={`Puesto ${finalPosition} de ${config?.totalEntrants}`}
+            />
+          </div>
+          <button
+            data-testid={TOURNAMENT.newTournamentBtn}
+            onClick={backToLobby}
+            className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+          >
+            <RotateCw className="w-4 h-4" /> Empezar otro torneo
+          </button>
+        </div>
+      )}
+
+      {phase === "won" && (
+        <div
+          data-testid={TOURNAMENT.wonScreen}
+          className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto glow-correct"
+        >
+          <Trophy className="w-16 h-16 text-[#F59E0B] mx-auto mb-4" />
+          <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+            ¡Has ganado el torneo!
+          </div>
+          <div className="text-[#94A3B8] mb-6">
+            Te impusiste a los {config?.totalEntrants} inscritos hasta quedarte con todas las fichas.
+          </div>
+          <div className="mb-6 text-left">
+            <SessionSummary
+              coachAdviceLog={coachAdviceLog}
+              handsPlayed={handHistory.length}
+              resultLine={`¡Ganaste el torneo de ${config?.totalEntrants}!`}
+            />
           </div>
           <button
             data-testid={TOURNAMENT.newTournamentBtn}
@@ -370,7 +558,7 @@ export default function Tournament() {
             <SessionSummary
               coachAdviceLog={coachAdviceLog}
               handsPlayed={handHistory.length}
-              resultLine={`Saliste con ${heroStack ?? 0} fichas`}
+              resultLine={`Saliste con ${heroStack} fichas · quedaban ${remaining}/${config?.totalEntrants}`}
             />
           </div>
           <button
@@ -394,23 +582,25 @@ export default function Tournament() {
             loading={loading || animating}
             dealing={dealing}
             onSkipDeal={skipDeal}
+            totalSeats={TOTAL_SEATS}
             finishedActions={
               heroStack > 0 ? (
                 <button
                   data-testid={TOURNAMENT.nextHandBtn}
                   onClick={nextHand}
-                  disabled={loading}
+                  disabled={loading || computingRound}
                   className="mt-4 px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <RotateCw className="w-4 h-4" /> Siguiente mano
+                  <RotateCw className="w-4 h-4" /> {computingRound ? "Calculando ronda…" : "Siguiente mano"}
                 </button>
               ) : (
                 <button
-                  data-testid={TOURNAMENT.newTournamentBtn}
-                  onClick={() => setPhase("eliminated")}
-                  className="mt-4 px-6 py-3 rounded-lg bg-[#EF4444] text-white font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+                  data-testid={TOURNAMENT.nextHandBtn}
+                  onClick={nextHand}
+                  disabled={computingRound}
+                  className="mt-4 px-6 py-3 rounded-lg bg-[#EF4444] text-white font-display font-bold uppercase tracking-wider inline-flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <Skull className="w-4 h-4" /> Ver resultado final
+                  <Skull className="w-4 h-4" /> {computingRound ? "Calculando…" : "Ver resultado final"}
                 </button>
               )
             }

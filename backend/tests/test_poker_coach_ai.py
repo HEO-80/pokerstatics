@@ -113,8 +113,12 @@ def test_coach_ai_builds_rich_context_and_filters_thought_parts(monkeypatch):
     assert captured["url"] == poker_coach_ai.GEMINI_URL
     assert captured["params"] == {"key": "test-key-123"}
     assert captured["json"]["system_instruction"]["parts"][0]["text"] == poker_coach_ai.SYSTEM_PROMPT
-    assert captured["json"]["generationConfig"]["maxOutputTokens"] == 400
+    assert captured["json"]["generationConfig"]["maxOutputTokens"] == 1000
     assert captured["json"]["generationConfig"]["temperature"] == 0.5
+    # thinkingBudget=0 apaga el "pensamiento" interno para que no se coma el
+    # presupuesto de tokens antes de escribir la respuesta (la causa de que
+    # antes saliera cortada a media frase).
+    assert captured["json"]["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}
 
     # --- el contexto (mensaje de usuario) trae los datos crudos y los
     # números del coach v1 (reutilizados, no recalculados aparte) ---
@@ -125,6 +129,52 @@ def test_coach_ai_builds_rich_context_and_filters_thought_parts(monkeypatch):
     assert "28.57" in context  # required_equity_pct exacto (40/(100+40)*100)
     assert "RECOMENDACIÓN MATEMÁTICA V1" in context.upper()
     assert "Agresivo (subió 38% preflop en 12 manos)" in context  # villain_style reenviado tal cual
+
+
+def test_coach_ai_concatenates_multiple_non_thought_text_parts(monkeypatch):
+    # Si Gemini divide la respuesta real en más de un part de texto (no solo
+    # el de "thought"), quedarse con el PRIMERO nada más también cortaría la
+    # respuesta -- deben concatenarse todos.
+    hand_id = _known_hand_id()
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-123")
+    monkeypatch.setattr(
+        poker_coach_ai.requests,
+        "post",
+        lambda *a, **kw: _gemini_success(
+            [
+                {"text": "pensando...", "thought": True},
+                {"text": "Primera mitad de la respuesta. "},
+                {"text": "Segunda mitad de la respuesta."},
+            ]
+        ),
+    )
+
+    resp = client.post(f"/api/table/{hand_id}/coach-ai", json={})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["text"] == "Primera mitad de la respuesta. Segunda mitad de la respuesta."
+
+
+def test_coach_ai_returns_502_with_clear_message_on_max_tokens_with_no_text(monkeypatch):
+    hand_id = _known_hand_id()
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-123")
+    monkeypatch.setattr(
+        poker_coach_ai.requests,
+        "post",
+        lambda *a, **kw: _FakeResponse(
+            200,
+            {
+                "candidates": [
+                    {"content": {"parts": [{"text": "solo pensó y no llegó a escribir nada", "thought": True}]},
+                     "finishReason": "MAX_TOKENS"}
+                ]
+            },
+        ),
+    )
+
+    resp = client.post(f"/api/table/{hand_id}/coach-ai", json={})
+    assert resp.status_code == 502
+    assert "MAX_TOKENS" in resp.json()["detail"]
+    assert "sube maxOutputTokens" in resp.json()["detail"]
 
 
 def test_coach_ai_works_without_optional_villain_style(monkeypatch):

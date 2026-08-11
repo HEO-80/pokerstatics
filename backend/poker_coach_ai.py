@@ -205,8 +205,15 @@ def ask_ai_coach(hand: Hand, hero_seat: int, villain_style: str | None = None) -
         "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "contents": [{"role": "user", "parts": [{"text": context}]}],
         "generationConfig": {
-            "maxOutputTokens": 400,
+            # gemini-2.5-flash gasta presupuesto de tokens en "pensar" ANTES
+            # de escribir la respuesta visible — con 400 el pensamiento se
+            # comía casi todo el límite y el texto salía cortado a media
+            # frase (finishReason: MAX_TOKENS). thinkingBudget=0 apaga ese
+            # pensamiento interno (igual que el HeoBot de referencia) y con
+            # eso 1000 tokens sí le sobran para una respuesta de 4-5 frases.
+            "maxOutputTokens": 1000,
             "temperature": 0.5,
+            "thinkingConfig": {"thinkingBudget": 0},
         },
     }
 
@@ -225,12 +232,26 @@ def ask_ai_coach(hand: Hand, hero_seat: int, villain_style: str | None = None) -
     if not candidates:
         raise CoachAiError("La IA no devolvió ninguna respuesta (puede que el contenido se haya bloqueado).")
 
-    # Gemini 2.5 puede intercalar "parts" de razonamiento interno (thought)
-    # antes del texto final -- se descartan y se usa el primer part de texto
-    # real, igual que hace route.ts.
-    parts = candidates[0].get("content", {}).get("parts", []) or []
-    for part in parts:
-        if not part.get("thought") and part.get("text"):
-            return part["text"]
+    candidate = candidates[0]
 
-    raise CoachAiError("La IA respondió, pero sin texto utilizable.")
+    # Gemini 2.5 puede intercalar "parts" de razonamiento interno (thought)
+    # antes del texto final -- se descartan. A diferencia de route.ts (que
+    # solo coge el PRIMER part sin thought), aquí se CONCATENAN todos los
+    # parts de texto real: si Gemini divide la respuesta en más de un part
+    # (pasa a veces incluso sin thinking), quedarse solo con el primero es
+    # otra forma de que el texto salga "cortado" aunque finishReason sea STOP.
+    parts = candidate.get("content", {}).get("parts", []) or []
+    text = "".join(part["text"] for part in parts if not part.get("thought") and part.get("text"))
+    if text:
+        return text
+
+    # Sin texto utilizable: si fue por quedarse sin tokens (MAX_TOKENS), el
+    # mensaje lo deja claro en vez de un "sin texto" genérico -- la solución
+    # es subir maxOutputTokens todavía más arriba.
+    finish_reason = candidate.get("finishReason")
+    if finish_reason == "MAX_TOKENS":
+        raise CoachAiError(
+            "La IA se quedó sin tokens antes de escribir nada (finishReason=MAX_TOKENS) — "
+            "sube maxOutputTokens en poker_coach_ai.py."
+        )
+    raise CoachAiError(f"La IA respondió, pero sin texto utilizable (finishReason={finish_reason!r}).")

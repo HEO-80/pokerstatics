@@ -228,11 +228,16 @@ export default function SitAndGo() {
     : view;
 
   return (
-    <div data-testid={SITANDGO.screen} className="w-full px-3 sm:px-6 py-4">
-      <div className="flex items-center justify-between mb-3">
-        <h1 className="font-display font-bold text-2xl uppercase tracking-tight text-white">
-          Sit &amp; Go
-        </h1>
+    <div data-testid={SITANDGO.screen} className="w-full px-3 sm:px-6 py-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] flex items-center justify-center shrink-0">
+            <Crown className="w-3.5 h-3.5 text-white" />
+          </div>
+          <h1 className="font-display font-bold text-sm uppercase tracking-tight text-white">
+            Sit &amp; Go
+          </h1>
+        </div>
         {phase === "playing" && view && (
           <div className="flex items-center gap-4">
             <div className="text-xs text-[#475569] font-mono-poker">

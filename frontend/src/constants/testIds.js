@@ -75,6 +75,8 @@ export const PLAY = {
   sessionSummary: "play-session-summary",
   coachAiBtn: "play-coach-ai-btn",
   coachAiSection: "play-coach-ai-section",
+  activityToggleBtn: "play-activity-toggle-btn",
+  coachAiToggleBtn: "play-coach-ai-toggle-btn",
 };
 
 export const TOURNAMENT = {
@@ -85,11 +87,19 @@ export const TOURNAMENT = {
   nextHandBtn: "tournament-next-hand-btn",
   eliminatedScreen: "tournament-eliminated-screen",
   exitedScreen: "tournament-exited-screen",
+  wonScreen: "tournament-won-screen",
   newTournamentBtn: "tournament-new-btn",
   backToLobbyBtn: "tournament-back-to-lobby-btn",
   levelBadge: "tournament-level-badge",
   heroNameInput: "tournament-hero-name-input",
   startLevelSelect: "tournament-start-level-select",
+  entrantsSelect: "tournament-entrants-select",
+  hud: "tournament-hud",
+  hudPlayers: "tournament-hud-players",
+  hudPosition: "tournament-hud-position",
+  hudAvgStack: "tournament-hud-avg-stack",
+  bubbleBanner: "tournament-bubble-banner",
+  finalTableBanner: "tournament-final-table-banner",
 };
 
 export const SITANDGO = {

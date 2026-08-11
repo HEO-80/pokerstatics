@@ -275,15 +275,23 @@ Después de que confirmes las ciegas y hagas el commit, yo iría a por los asien
 - [✅ ] Sonidos (reparto, fichas) con on/off
 - [✅ ] Temporizador de turno (segundos para decidir + auto-fold) + tic-tac
 - [✅ ] recomendacion de tipo de jugada diferenciada por color
-- [ ] Lectura de manos de contrarios
-- [ ] integrar ia a la lectura de manos
-- [ ] Paso 5 — EL COACH (el bot de ayuda / pensamiento en voz alta) ← la joya
+- [✅ ] Lectura de manos de contrarios
+- [✅] integrar ia a la lectura de manos
+- [✅ ] Paso 5 — EL COACH (el bot de ayuda / pensamiento en voz alta) ← la joya
 - [ ] Paso 6 — Puntos y niveles (scoring por calidad de decisión)
 
 ## MÁS ADELANTE (grande)
-- [ ] Torneo multi-mesa de 500 (simular todas las mesas hasta la final)
+- [✅ ] Torneo multi-mesa de 500 (simular todas las mesas hasta la final)
 - [ ] Registro / login con tu nombre real
 - [ ] Extraer charts de PokerCoaching (PDF) como más datos de rangos
+Y déjame que te sitúe, porque has cerrado prácticamente todo:
+
+✅ Entrenador completo (juego, coach matemático, coach IA, resúmenes)
+✅ Sit & Go redondo
+✅ Torneo multi-mesa funcionando ← lo acabas de cerrar
+⬜ Ranking del torneo ← esto de ahora (detalle)
+⬜ Paso 6 — Puntos y niveles (opcional)
+⬜ SatoshisTable (el proyecto nuevo)
 
 ## NOTAS
 - Arrancar Claude Code en la carpeta pokerstatics.

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ChevronLeft, ChevronRight, Loader2, Sparkles, Trophy } from "lucide-react";
-import { fetchTableCoachAi } from "@/lib/api";
+import { ChevronLeft, ChevronRight, Trophy } from "lucide-react";
 import { cardGlyph } from "@/lib/cardGlyphs";
 import { summarizePlayer } from "@/lib/villainStats";
 import { summarizeHand } from "@/lib/handSummary";
@@ -83,19 +82,15 @@ function buildNavigableSlides(coachAdviceLog, handHistory) {
  * vivo". Que el panel esté abierto o cerrado no afecta a qué datos existen,
  * solo a si se están mirando.
  *
- * Coach v2 (IA, botón "Pregúntale al coach"): a diferencia del v1, esto NO
- * se pide nunca automáticamente — solo cuando el usuario pulsa el botón, y
- * solo tiene sentido para la decisión LIVE de verdad (`isTrulyLive`, no para
- * consejos históricos ni resúmenes de mano: por eso necesita `handId`, el
- * hand_id REAL de la mano en curso — a diferencia de `coachAdviceLog`, que
- * solo guarda el nº de mano de sesión, no ese id). La respuesta se guarda en
- * `aiByEntryId`, keyed por el id de la entrada del consejo, para no
- * mezclarla si el usuario navega a otra decisión mientras espera o después.
+ * Coach v2 (IA): vive aparte, en el panel "Coach IA" de la derecha (ver
+ * AiCoachPanel.jsx / HandTable.jsx) — este componente ya no lo dispara ni
+ * guarda su respuesta. `villainStyleText` (exportada más abajo) la reutiliza
+ * tanto esta vista como el panel de la derecha para describir el estilo del
+ * rival, sin duplicar el formateo del texto.
  */
-export default function CoachPanel({ active, handId, coachAdviceLog, handHistory }) {
+export default function CoachPanel({ active, coachAdviceLog, handHistory }) {
   const slides = useMemo(() => buildNavigableSlides(coachAdviceLog, handHistory), [coachAdviceLog, handHistory]);
   const [pinnedIndex, setPinnedIndex] = useState(null);
-  const [aiByEntryId, setAiByEntryId] = useState({});
 
   const count = slides.length;
   const liveIndex = count - 1;
@@ -121,25 +116,6 @@ export default function CoachPanel({ active, handId, coachAdviceLog, handHistory
       return;
     }
     setPinnedIndex(viewIndex + 1);
-  };
-
-  const askAi = async (entry) => {
-    if (!handId) return;
-    const villainSummary = entry.villainName ? summarizePlayer(handHistory, entry.villainName) : null;
-    const villainStyle = villainStyleText(villainSummary);
-    setAiByEntryId((prev) => ({ ...prev, [entry.id]: { status: "loading" } }));
-    try {
-      const data = await fetchTableCoachAi(handId, villainStyle);
-      setAiByEntryId((prev) => ({ ...prev, [entry.id]: { status: "done", text: data.text } }));
-    } catch (e) {
-      setAiByEntryId((prev) => ({
-        ...prev,
-        [entry.id]: {
-          status: "error",
-          error: e.response?.data?.detail || "No se pudo obtener el análisis de la IA ahora mismo.",
-        },
-      }));
-    }
   };
 
   if (count === 0) {
@@ -191,15 +167,7 @@ export default function CoachPanel({ active, handId, coachAdviceLog, handHistory
         </button>
       </div>
 
-      {slide?.type === "advice" && (
-        <CoachAdviceEntryView
-          entry={slide.entry}
-          handHistory={handHistory}
-          canAskAi={isTrulyLive}
-          aiState={aiByEntryId[slide.entry.id]}
-          onAskAi={() => askAi(slide.entry)}
-        />
-      )}
+      {slide?.type === "advice" && <CoachAdviceEntryView entry={slide.entry} handHistory={handHistory} />}
       {slide?.type === "handSummary" && <HandSummaryView hand={slide.hand} coachAdviceLog={coachAdviceLog} />}
     </div>
   );
@@ -281,7 +249,7 @@ function readingText(entry) {
  * historial de manos ya jugadas (lib/villainStats.js — VPIP/PFR/agresividad
  * por frecuencias, NO deduce qué carta tiene). Se recalcula con los datos
  * ACTUALES de la sesión aunque se esté viendo un consejo histórico. */
-function villainStyleText(summary) {
+export function villainStyleText(summary) {
   if (!summary?.name) return null;
   if (!summary.hasEnoughData) {
     const n = summary.handsObserved;
@@ -302,7 +270,7 @@ function outcomeText(entry) {
   return `${actionWord}${resultWord ? " " + resultWord : " (la mano seguía en juego)."}`;
 }
 
-function CoachAdviceEntryView({ entry, handHistory, canAskAi, aiState, onAskAi }) {
+function CoachAdviceEntryView({ entry, handHistory }) {
   const villainSummary = entry.villainName ? summarizePlayer(handHistory, entry.villainName) : null;
 
   return (
@@ -387,48 +355,6 @@ function CoachAdviceEntryView({ entry, handHistory, canAskAi, aiState, onAskAi }
           )}
           {outcomeText(entry) && <div className="text-[#475569] text-xs mt-1.5">{outcomeText(entry)}</div>}
           <div className="text-[10px] text-[#475569] mt-1.5">Esto es orientativo — la decisión final siempre es tuya.</div>
-        </div>
-      )}
-
-      {/* Coach v2 (IA), solo para la decisión LIVE — bajo demanda, nunca automático */}
-      {canAskAi && (
-        <div data-testid={PLAY.coachAiSection} className="pt-2 border-t border-white/8">
-          {(!aiState || aiState.status === "idle") && (
-            <button
-              type="button"
-              data-testid={PLAY.coachAiBtn}
-              onClick={onAskAi}
-              className="w-full px-3 py-2 rounded-lg border border-[#8B5CF6]/40 bg-[#8B5CF6]/10 text-[#8B5CF6] text-xs font-display font-bold uppercase tracking-wide hover:bg-[#8B5CF6]/20 transition-colors inline-flex items-center justify-center gap-1.5"
-            >
-              <Sparkles className="w-3.5 h-3.5" /> Pregúntale al coach (IA)
-            </button>
-          )}
-          {aiState?.status === "loading" && (
-            <div className="text-xs text-[#8B5CF6] flex items-center gap-1.5">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Pensando…
-            </div>
-          )}
-          {aiState?.status === "error" && (
-            <div className="space-y-1.5">
-              <div className="text-xs text-[#EF4444] flex items-start gap-1.5">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {aiState.error}
-              </div>
-              <button type="button" onClick={onAskAi} className="text-[11px] text-[#8B5CF6] hover:underline">
-                Reintentar
-              </button>
-            </div>
-          )}
-          {aiState?.status === "done" && (
-            <div className="rounded-lg border border-[#8B5CF6]/30 bg-[#8B5CF6]/10 p-3">
-              <div className="text-[11px] uppercase tracking-widest text-[#8B5CF6] font-bold mb-1.5 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" /> Análisis del coach (IA)
-              </div>
-              <div className="text-[#E9D5FF] leading-relaxed whitespace-pre-line">{aiState.text}</div>
-              <button type="button" onClick={onAskAi} className="text-[10px] text-[#8B5CF6] hover:underline mt-2">
-                Volver a preguntar
-              </button>
-            </div>
-          )}
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { RotateCw, Settings2 } from "lucide-react";
+import { Gamepad2, RotateCw, Settings2 } from "lucide-react";
 import HandTable from "@/components/HandTable";
 import PlaySetupForm from "@/components/PlaySetupForm";
 import { createTableHand } from "@/lib/api";
@@ -83,11 +83,16 @@ export default function Practice() {
   const canStartNew = !view || view.finished;
 
   return (
-    <div data-testid={PLAY.screen} className="w-full px-3 sm:px-6 py-4">
-      <div className="flex items-center justify-between mb-3">
-        <h1 className="font-display font-bold text-2xl uppercase tracking-tight text-white">
-          Práctica
-        </h1>
+    <div data-testid={PLAY.screen} className="w-full px-3 sm:px-6 py-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] flex items-center justify-center shrink-0">
+            <Gamepad2 className="w-3.5 h-3.5 text-white" />
+          </div>
+          <h1 className="font-display font-bold text-sm uppercase tracking-tight text-white">
+            Práctica
+          </h1>
+        </div>
         {view && (
           <button
             onClick={reset}

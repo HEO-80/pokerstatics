@@ -72,3 +72,21 @@ export async function fetchTableCoachAi(handId, villainStyle) {
   const { data } = await client.post(`/table/${handId}/coach-ai`, { villain_style: villainStyle ?? null });
   return data;
 }
+
+// ----------------- Torneo MTT (Tournament.jsx) -----------------
+
+/**
+ * Una ronda del modelo de eliminación del campo (backend/mtt_simulation.py,
+ * ver docstring ahí para el modelo completo). Stateless: el frontend manda
+ * su estado actual del torneo y recibe cuánta gente cayó esta ronda.
+ */
+export async function simulateMttRound({ totalEntrants, remainingTotal, fieldPool, startingStack, heroStack }) {
+  const { data } = await client.post("/mtt/round", {
+    total_entrants: totalEntrants,
+    remaining_total: remainingTotal,
+    field_pool: fieldPool,
+    starting_stack: startingStack,
+    hero_stack: heroStack ?? null,
+  });
+  return data;
+}

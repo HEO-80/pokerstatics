@@ -2,10 +2,16 @@ import { Link, NavLink } from "react-router-dom";
 import { Spade, LayoutDashboard, RotateCcw, Upload, Home, Gamepad2, Swords, Crown } from "lucide-react";
 import { NAV } from "@/constants/testIds";
 
+// Pestaña activa estilo "carpeta": borde inferior de color + fondo tintado,
+// en vez de solo un fondo plano — así se lee de un vistazo en qué página
+// estás sin depender del título grande de cada página (ver cabeceras
+// compactas de Sit&Go/Torneo/Práctica). El borde inferior transparente en
+// los estados inactivo/hover evita que el texto salte de sitio al activarse
+// (mismo alto siempre, solo cambia el color del borde).
 const linkBase =
-  "px-4 py-2 rounded-md text-sm font-medium tracking-wide transition-colors flex items-center gap-2";
-const linkInactive = "text-[#94A3B8] hover:text-white hover:bg-white/5";
-const linkActive = "text-white bg-white/10";
+  "px-4 py-2 rounded-md text-sm font-medium tracking-wide transition-colors flex items-center gap-2 border-b-2";
+const linkInactive = "text-[#94A3B8] hover:text-white hover:bg-white/5 border-transparent";
+const linkActive = "text-white bg-white/10 border-[#3B82F6]";
 
 export default function NavBar() {
   return (
