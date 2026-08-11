@@ -69,6 +69,10 @@ export const PLAY = {
   soundToggleBtn: "play-sound-toggle-btn",
   turnTimer: "play-turn-timer",
   turnTimerPauseBtn: "play-turn-timer-pause-btn",
+  coachPrevBtn: "play-coach-prev-btn",
+  coachNextBtn: "play-coach-next-btn",
+  coachCounter: "play-coach-counter",
+  sessionSummary: "play-session-summary",
 };
 
 export const TOURNAMENT = {
@@ -78,7 +82,9 @@ export const TOURNAMENT = {
   exitBtn: "tournament-exit-btn",
   nextHandBtn: "tournament-next-hand-btn",
   eliminatedScreen: "tournament-eliminated-screen",
+  exitedScreen: "tournament-exited-screen",
   newTournamentBtn: "tournament-new-btn",
+  backToLobbyBtn: "tournament-back-to-lobby-btn",
   levelBadge: "tournament-level-badge",
   heroNameInput: "tournament-hero-name-input",
   startLevelSelect: "tournament-start-level-select",
@@ -92,6 +98,7 @@ export const SITANDGO = {
   nextHandBtn: "sitandgo-next-hand-btn",
   bustedScreen: "sitandgo-busted-screen",
   wonScreen: "sitandgo-won-screen",
+  exitedScreen: "sitandgo-exited-screen",
   backToLobbyBtn: "sitandgo-back-to-lobby-btn",
   levelBadge: "sitandgo-level-badge",
   heroNameInput: "sitandgo-hero-name-input",

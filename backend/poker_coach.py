@@ -171,6 +171,32 @@ RAISE_MARGIN_PCT = 20.0
 RAISE_MIN_EQUITY_PCT = 55.0
 
 
+def _raise_size_rationale(hand: Hand, raise_to: float) -> str:
+    """Frase breve (una línea) de por qué el tamaño de subida sugerido es ESE
+    número — para que "Considera RAISE a X" no aparezca sin explicación.
+    Recalcula el objetivo SIN acotar (apuesta actual + STANDARD_RAISE_FRACTION
+    del bote, la misma fórmula que standard_raise_to) para saber si `raise_to`
+    coincide con ese ~2/3 de bote "de libro" o si tuvo que acotarse a los
+    límites legales de la mesa (subida mínima, o todo el stack disponible)."""
+    pot_before = hand.pot_total()
+    frac_pct = round(STANDARD_RAISE_FRACTION * 100)
+    unclamped = round(hand.current_bet + pot_before * STANDARD_RAISE_FRACTION)
+    if raise_to == unclamped:
+        return (
+            f"El tamaño ({raise_to}) es ~{frac_pct}% del bote ({round(pot_before)}): suficiente para "
+            f"presionar (mantiene el fold-equity necesario razonable) sin arriesgar de más."
+        )
+    if raise_to > unclamped:
+        return (
+            f"El tamaño ({raise_to}) es la subida mínima legal ahora mismo — por debajo del ~{frac_pct}% "
+            f"de bote habitual, pero no se puede subir menos."
+        )
+    return (
+        f"El tamaño ({raise_to}) es todo lo que te queda de stack — no llega al ~{frac_pct}% de bote "
+        f"habitual, pero es tu máximo posible aquí."
+    )
+
+
 def derive_recommendation(
     hand: Hand, hero_seat: int, to_call: float, po: dict, equity: dict | None, breakeven: dict | None
 ) -> dict | None:
@@ -194,6 +220,7 @@ def derive_recommendation(
                     f"No hay nada que pagar y tu equity estimada (~{eq_pct}%) es alta -> apostar por "
                     f"valor tiene sentido (sube a {breakeven['raise_to']}). {context}"
                 ),
+                "raise_size_rationale": _raise_size_rationale(hand, breakeven["raise_to"]),
             }
         return {
             "accion_sugerida": "check",
@@ -246,6 +273,7 @@ def derive_recommendation(
                 f"amplio y tu mano tiene ventaja clara sobre el rango del rival -> raise de valor a "
                 f"{breakeven['raise_to']}. {context}"
             ),
+            "raise_size_rationale": _raise_size_rationale(hand, breakeven["raise_to"]),
         }
 
     return {

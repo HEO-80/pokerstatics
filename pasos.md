@@ -274,6 +274,9 @@ Después de que confirmes las ciegas y hagas el commit, yo iría a por los asien
 - [✅ ] En la pantalla de actividad que no ponga se retira qe ponga hizo fold, que no dia iguala es hizo call, o en el caso de check, en el caso de que sube hizo raise, o 3bet o lo que sea o en vez de ir con todo hizo all in. argot de poker..
 - [✅ ] Sonidos (reparto, fichas) con on/off
 - [✅ ] Temporizador de turno (segundos para decidir + auto-fold) + tic-tac
+- [✅ ] recomendacion de tipo de jugada diferenciada por color
+- [ ] Lectura de manos de contrarios
+- [ ] integrar ia a la lectura de manos
 - [ ] Paso 5 — EL COACH (el bot de ayuda / pensamiento en voz alta) ← la joya
 - [ ] Paso 6 — Puntos y niveles (scoring por calidad de decisión)
 

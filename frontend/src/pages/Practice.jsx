@@ -26,8 +26,19 @@ export default function Practice() {
   // en vez del hardcode a 0 (que con hero_seat también en 0 por defecto hacía
   // que el hero fuera siempre el dealer inicial). Rota normalmente después.
   const nextButtonRef = useRef(null);
-  const { view, handHistory, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
-    useTableSession();
+  const {
+    view,
+    handHistory,
+    coachAdviceLog,
+    loading,
+    animating,
+    dealing,
+    skipDeal,
+    error,
+    reset,
+    dealAnimated,
+    actionAnimated,
+  } = useTableSession();
 
   const startHand = useCallback(
     async (formConfig) => {
@@ -72,7 +83,7 @@ export default function Practice() {
   const canStartNew = !view || view.finished;
 
   return (
-    <div data-testid={PLAY.screen} className="mx-auto max-w-[1400px] px-6 py-4">
+    <div data-testid={PLAY.screen} className="w-full px-3 sm:px-6 py-4">
       <div className="flex items-center justify-between mb-3">
         <h1 className="font-display font-bold text-2xl uppercase tracking-tight text-white">
           Práctica
@@ -109,6 +120,7 @@ export default function Practice() {
           view={view}
           roles={roles}
           handHistory={handHistory}
+          coachAdviceLog={coachAdviceLog}
           onAction={applyAction}
           loading={loading || animating}
           dealing={dealing}

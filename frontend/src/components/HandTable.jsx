@@ -56,6 +56,7 @@ export default function HandTable({
   view,
   roles,
   handHistory,
+  coachAdviceLog,
   onAction,
   loading,
   finishedActions,
@@ -117,9 +118,9 @@ export default function HandTable({
           <div data-testid={PLAY.helpPanel} className="flex-1 glass-panel rounded-xl p-3 overflow-y-auto">
             <div className="text-[10px] uppercase tracking-widest text-[#475569] mb-2">Coach</div>
             <CoachPanel
-              handId={view.hand_id}
               active={helpOpen && view.is_hero_turn && !view.finished}
-              players={view.players}
+              coachAdviceLog={coachAdviceLog}
+              handHistory={handHistory}
             />
           </div>
         )}

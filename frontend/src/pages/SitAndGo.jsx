@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { Crown, RotateCw, LogOut, Skull, Trophy, TrendingUp } from "lucide-react";
 import HandTable from "@/components/HandTable";
 import ActivityLog from "@/components/ActivityLog";
+import SessionSummary from "@/components/SessionSummary";
 import { createTableHand } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
@@ -53,7 +54,7 @@ function buildSurvivorHand(players, aliveSlots) {
 }
 
 export default function SitAndGo() {
-  const [phase, setPhase] = useState("lobby"); // lobby | playing | busted | won
+  const [phase, setPhase] = useState("lobby"); // lobby | playing | busted | won | exited
   const [lobby, setLobby] = useState(LOBBY_DEFAULTS);
   const [config, setConfig] = useState(null);
   const [buttonSeat, setButtonSeat] = useState(0);
@@ -78,8 +79,19 @@ export default function SitAndGo() {
   // mismo punto del óvalo, aunque el backend renumere sus asientos.
   const rosterRef = useRef([]);
   const aliveSlotsRef = useRef([]);
-  const { view, handHistory, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
-    useTableSession("sitandgo");
+  const {
+    view,
+    handHistory,
+    coachAdviceLog,
+    loading,
+    animating,
+    dealing,
+    skipDeal,
+    error,
+    reset,
+    dealAnimated,
+    actionAnimated,
+  } = useTableSession("sitandgo");
   // El asiento de backend SÍ se renumera cada mano según quién sobrevive
   // (ver buildSurvivorHand) — hay que pasar por aliveSlotsRef (asiento de
   // ESTA mano -> slot persistente) antes de mirar el roster, igual que hace
@@ -216,7 +228,7 @@ export default function SitAndGo() {
     : view;
 
   return (
-    <div data-testid={SITANDGO.screen} className="mx-auto max-w-[1400px] px-6 py-4">
+    <div data-testid={SITANDGO.screen} className="w-full px-3 sm:px-6 py-4">
       <div className="flex items-center justify-between mb-3">
         <h1 className="font-display font-bold text-2xl uppercase tracking-tight text-white">
           Sit &amp; Go
@@ -243,7 +255,7 @@ export default function SitAndGo() {
             </div>
             <button
               data-testid={SITANDGO.exitBtn}
-              onClick={backToLobby}
+              onClick={() => setPhase("exited")}
               className="px-4 py-2 rounded-lg border border-white/12 text-white text-sm font-display uppercase tracking-wider hover:bg-white/5 transition-colors inline-flex items-center gap-2"
             >
               <LogOut className="w-4 h-4" /> Salir
@@ -365,6 +377,33 @@ export default function SitAndGo() {
         </div>
       )}
 
+      {phase === "exited" && (
+        <div
+          data-testid={SITANDGO.exitedScreen}
+          className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
+        >
+          <LogOut className="w-16 h-16 text-[#94A3B8] mx-auto mb-4" />
+          <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+            Has salido del Sit &amp; Go
+          </div>
+          <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
+          <div className="mb-6 text-left">
+            <SessionSummary
+              coachAdviceLog={coachAdviceLog}
+              handsPlayed={handHistory.length}
+              resultLine={`Saliste con ${heroStack} fichas · quedaban ${survivorsLeft}/${TOTAL_SEATS}`}
+            />
+          </div>
+          <button
+            data-testid={SITANDGO.backToLobbyBtn}
+            onClick={backToLobby}
+            className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+          >
+            <RotateCw className="w-4 h-4" /> Volver al lobby
+          </button>
+        </div>
+      )}
+
       {phase === "busted" && (
         <div
           data-testid={SITANDGO.bustedScreen}
@@ -375,6 +414,13 @@ export default function SitAndGo() {
             Has quedado en posición {finalPosition}
           </div>
           <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
+          <div className="mb-6 text-left">
+            <SessionSummary
+              coachAdviceLog={coachAdviceLog}
+              handsPlayed={handHistory.length}
+              resultLine={`Posición ${finalPosition} de ${TOTAL_SEATS}`}
+            />
+          </div>
           <button
             data-testid={SITANDGO.backToLobbyBtn}
             onClick={backToLobby}
@@ -395,6 +441,13 @@ export default function SitAndGo() {
             ¡Has ganado el Sit &amp; Go!
           </div>
           <div className="text-[#94A3B8] mb-6">Te quedaste con todas las fichas de la mesa.</div>
+          <div className="mb-6 text-left">
+            <SessionSummary
+              coachAdviceLog={coachAdviceLog}
+              handsPlayed={handHistory.length}
+              resultLine="¡Ganaste el Sit&Go!"
+            />
+          </div>
           <button
             data-testid={SITANDGO.backToLobbyBtn}
             onClick={backToLobby}
@@ -411,6 +464,7 @@ export default function SitAndGo() {
             view={displayView}
             roles={roles}
             handHistory={handHistory}
+            coachAdviceLog={coachAdviceLog}
             onAction={applyAction}
             loading={loading || animating}
             dealing={dealing}

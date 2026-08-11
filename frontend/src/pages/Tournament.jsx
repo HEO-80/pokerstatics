@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { Swords, RotateCw, LogOut, Skull, TrendingUp } from "lucide-react";
 import HandTable from "@/components/HandTable";
 import ActivityLog from "@/components/ActivityLog";
+import SessionSummary from "@/components/SessionSummary";
 import { createTableHand } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
@@ -32,7 +33,7 @@ const fieldClass =
   "w-full bg-[#0F1115] border border-white/12 rounded-lg px-3 py-2 text-white text-sm font-mono-poker focus:outline-none focus:border-[#3B82F6]";
 
 export default function Tournament() {
-  const [phase, setPhase] = useState("lobby"); // lobby | playing | eliminated
+  const [phase, setPhase] = useState("lobby"); // lobby | playing | eliminated | exited
   const [lobby, setLobby] = useState(LOBBY_DEFAULTS);
   const [config, setConfig] = useState(null);
   const [buttonSeat, setButtonSeat] = useState(0);
@@ -52,8 +53,19 @@ export default function Tournament() {
   // nunca se renumera (los bots eliminados se quedan sentados a 0), así que
   // no hace falta ninguna traducción de posición — solo el nombre.
   const rosterRef = useRef([]);
-  const { view, handHistory, loading, animating, dealing, skipDeal, error, reset, dealAnimated, actionAnimated } =
-    useTableSession("tournament");
+  const {
+    view,
+    handHistory,
+    coachAdviceLog,
+    loading,
+    animating,
+    dealing,
+    skipDeal,
+    error,
+    reset,
+    dealAnimated,
+    actionAnimated,
+  } = useTableSession("tournament");
   // El asiento de backend nunca se renumera en Torneo, así que traducir a un
   // nombre persistente es trivial: rosterRef[seat], con fallback al nombre
   // crudo del backend por si acaso (no debería hacer falta).
@@ -174,7 +186,7 @@ export default function Tournament() {
     : view;
 
   return (
-    <div data-testid={TOURNAMENT.screen} className="mx-auto max-w-[1400px] px-6 py-4">
+    <div data-testid={TOURNAMENT.screen} className="w-full px-3 sm:px-6 py-4">
       <div className="flex items-center justify-between mb-3">
         <h1 className="font-display font-bold text-2xl uppercase tracking-tight text-white">
           Torneo
@@ -200,7 +212,7 @@ export default function Tournament() {
             </div>
             <button
               data-testid={TOURNAMENT.exitBtn}
-              onClick={backToLobby}
+              onClick={() => setPhase("exited")}
               className="px-4 py-2 rounded-lg border border-white/12 text-white text-sm font-display uppercase tracking-wider hover:bg-white/5 transition-colors inline-flex items-center gap-2"
             >
               <LogOut className="w-4 h-4" /> Salir del torneo
@@ -331,6 +343,9 @@ export default function Tournament() {
             Eliminado
           </div>
           <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
+          <div className="mb-6 text-left">
+            <SessionSummary coachAdviceLog={coachAdviceLog} handsPlayed={handHistory.length} resultLine="Eliminado" />
+          </div>
           <button
             data-testid={TOURNAMENT.newTournamentBtn}
             onClick={backToLobby}
@@ -341,12 +356,40 @@ export default function Tournament() {
         </div>
       )}
 
+      {phase === "exited" && (
+        <div
+          data-testid={TOURNAMENT.exitedScreen}
+          className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
+        >
+          <LogOut className="w-16 h-16 text-[#94A3B8] mx-auto mb-4" />
+          <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+            Has salido del torneo
+          </div>
+          <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
+          <div className="mb-6 text-left">
+            <SessionSummary
+              coachAdviceLog={coachAdviceLog}
+              handsPlayed={handHistory.length}
+              resultLine={`Saliste con ${heroStack ?? 0} fichas`}
+            />
+          </div>
+          <button
+            data-testid={TOURNAMENT.backToLobbyBtn}
+            onClick={backToLobby}
+            className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+          >
+            <RotateCw className="w-4 h-4" /> Volver al lobby
+          </button>
+        </div>
+      )}
+
       {phase === "playing" && view && (
         <div className="mt-2">
           <HandTable
             view={displayView}
             roles={roles}
             handHistory={handHistory}
+            coachAdviceLog={coachAdviceLog}
             onAction={applyAction}
             loading={loading || animating}
             dealing={dealing}

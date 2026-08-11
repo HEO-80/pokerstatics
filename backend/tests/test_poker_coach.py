@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import poker_coach
 import poker_table_api
 from poker_engine import make_card
 from poker_table import Hand, PlayerState, deck_with_known_cards
@@ -154,6 +155,14 @@ def test_coach_pot_odds_and_breakeven_are_exact_and_equity_is_sane():
     assert rec["es_marginal"] is False
     assert "raise" in rec["explicacion"].lower()
 
+    # --- explicación del tamaño (Tarea 1): 107 == round(40 + 100*2/3), el
+    # objetivo SIN acotar -> caso "limpio", no hizo falta recortar a los
+    # límites legales de la mesa.
+    assert rec["raise_size_rationale"] == (
+        "El tamaño (107) es ~67% del bote (100): suficiente para presionar "
+        "(mantiene el fold-equity necesario razonable) sin arriesgar de más."
+    )
+
 
 def _known_heads_up_hand_weak_vs_shove() -> Hand:
     """
@@ -250,3 +259,50 @@ def test_coach_returns_400_when_it_is_not_the_hero_turn():
 def test_coach_returns_404_for_unknown_hand_id():
     resp = client.get("/api/table/no-such-hand/coach")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Tarea 1 — _raise_size_rationale(): explicación de por qué el tamaño de
+# subida sugerido es ESE número. Se prueba directamente con un stub mínimo
+# (solo necesita .pot_total() y .current_bet, ver la firma de la función) en
+# vez de construir una Hand real completa para cada uno de los 3 casos: es
+# más simple y deja clarísimo qué combinación de (pot, current_bet, raise_to)
+# dispara cada rama.
+# ---------------------------------------------------------------------------
+class _StubHandForRationale:
+    def __init__(self, pot_total: float, current_bet: float):
+        self._pot_total = pot_total
+        self.current_bet = current_bet
+
+    def pot_total(self) -> float:
+        return self._pot_total
+
+
+def test_raise_size_rationale_clean_two_thirds_pot():
+    stub = _StubHandForRationale(pot_total=100, current_bet=40)
+    # round(40 + 100*2/3) = round(106.666...) = 107 -> coincide exactamente,
+    # no hizo falta acotar a ningún límite legal.
+    text = poker_coach._raise_size_rationale(stub, 107)
+    assert text == (
+        "El tamaño (107) es ~67% del bote (100): suficiente para presionar "
+        "(mantiene el fold-equity necesario razonable) sin arriesgar de más."
+    )
+
+
+def test_raise_size_rationale_clamped_to_table_minimum():
+    stub = _StubHandForRationale(pot_total=100, current_bet=40)
+    # 127 > 107 (el objetivo sin acotar) -> se interpreta como "se tuvo que
+    # subir al mínimo legal" (el único motivo por el que el tamaño real
+    # ACABA POR ENCIMA del objetivo de 2/3 de bote).
+    text = poker_coach._raise_size_rationale(stub, 127)
+    assert "subida mínima legal" in text
+    assert "127" in text
+
+
+def test_raise_size_rationale_clamped_to_all_in():
+    stub = _StubHandForRationale(pot_total=100, current_bet=40)
+    # 90 < 107 (el objetivo sin acotar) -> el stack del hero no llegaba para
+    # un 2/3 de bote completo, se acotó a su máximo (all-in).
+    text = poker_coach._raise_size_rationale(stub, 90)
+    assert "todo lo que te queda de stack" in text
+    assert "90" in text

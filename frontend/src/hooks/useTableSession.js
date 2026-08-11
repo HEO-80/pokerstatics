@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { sendTableAction } from "@/lib/api";
+import { fetchTableCoach, sendTableAction } from "@/lib/api";
 import { animateHandUpdate, buildHeroLogEntry, buildInitialFrame, createRaiseTracker } from "@/lib/handAnimation";
 import { createSkipSignal, dealTotalDuration, waitOrSkip } from "@/lib/dealAnimation";
 import { seatName } from "@/lib/table";
 import { createHandRecord, boardStreetsFromCards, mergeBoardStreets } from "@/lib/handHistory";
 import { groupPotResults, formatPotGroupText } from "@/lib/potResults";
 import { loadHandHistory, saveHandHistory, clearHandHistory } from "@/lib/handHistoryStorage";
+import {
+  buildCoachAdviceEntry,
+  loadCoachAdviceLog,
+  saveCoachAdviceLog,
+  clearCoachAdviceLog,
+  pairHeroAction,
+  pairHandResult,
+} from "@/lib/coachAdvice";
 import { playDeal, playChip } from "@/lib/sound";
 
 const CHIP_SOUND_ACTIONS = new Set(["call", "raise", "all_in"]);
@@ -35,21 +43,36 @@ const CHIP_SOUND_ACTIONS = new Set(["call", "raise", "all_in"]);
  * cada registro) — a diferencia del antiguo `botLog`, que se reiniciaba en
  * cada `dealAnimated` y no incluía las acciones del hero.
  *
- * `storageKey` (opcional) activa la persistencia de `handHistory` en
- * localStorage (ver lib/handHistoryStorage.js): se siembra el estado inicial
- * desde lo guardado (así sobrevive a recargar la página a media partida) y se
- * regraba en cada cambio. `reset()` y la recuperación por hand_id perdido
- * (404) limpian también lo persistido — una partida NUEVA no debe arrastrar
- * el historial de la anterior. Sin `storageKey` (Práctica) el hook se
- * comporta igual que antes, solo en memoria.
+ * `coachAdviceLog` es el historial CONTINUO de análisis del coach de la
+ * sesión (ver lib/coachAdvice.js para el modelo exacto y cómo se empareja
+ * cada entrada con la acción real del hero y con el resultado de la mano).
+ * Se pide EN SEGUNDO PLANO cada vez que empieza un turno del hero — no hace
+ * falta tener el panel "Ayuda" abierto — para que el resumen de fin de
+ * partida (lib/sessionSummary.js) tenga datos de todas las decisiones, no
+ * solo de las que el jugador miró.
+ *
+ * `storageKey` (opcional) activa la persistencia de `handHistory` Y
+ * `coachAdviceLog` en localStorage (ver lib/handHistoryStorage.js /
+ * lib/coachAdvice.js): se siembra el estado inicial desde lo guardado (así
+ * sobrevive a recargar la página a media partida) y se regraba en cada
+ * cambio. `reset()` y la recuperación por hand_id perdido (404) limpian
+ * también lo persistido — una partida NUEVA no debe arrastrar el historial
+ * de la anterior. Sin `storageKey` (Práctica) el hook se comporta igual,
+ * solo en memoria.
  */
 export function useTableSession(storageKey) {
   const [view, setView] = useState(null);
   const [handHistory, setHandHistory] = useState(() => (storageKey ? loadHandHistory(storageKey) : []));
+  const [coachAdviceLog, setCoachAdviceLog] = useState(() => (storageKey ? loadCoachAdviceLog(storageKey) : []));
 
   useEffect(() => {
     if (storageKey) saveHandHistory(storageKey, handHistory);
   }, [storageKey, handHistory]);
+
+  useEffect(() => {
+    if (storageKey) saveCoachAdviceLog(storageKey, coachAdviceLog);
+  }, [storageKey, coachAdviceLog]);
+
   const [loading, setLoading] = useState(false);
   const [animating, setAnimating] = useState(false);
   const [dealing, setDealing] = useState(false);
@@ -69,6 +92,13 @@ export function useTableSession(storageKey) {
   // mismos asientos) — permite que cada página traduzca el asiento efímero
   // del backend a su propio roster persistente (ver Tournament/SitAndGo).
   const resolveNameRef = useRef((seat, players) => seatName(players, seat));
+  // Contador de "turno" del hero + id de la entrada de coachAdviceLog en
+  // curso de emparejar con la acción real del hero — ver el docstring de
+  // lib/coachAdvice.js para el porqué de este guard (evitar emparejar una
+  // respuesta que llega tarde con la decisión SIGUIENTE).
+  const turnSeqRef = useRef(0);
+  const pendingAdviceIdRef = useRef(null);
+  const coachAdviceIdRef = useRef(0);
 
   /** Aplica `updater` al ÚLTIMO registro del historial (la mano en curso) de
    * forma inmutable; no-op si todavía no hay ninguna mano. */
@@ -110,8 +140,10 @@ export function useTableSession(storageKey) {
   /** Al terminar la reproducción (o si no hubo bot_actions que reproducir),
    * asegura que el board quede completo aunque alguna calle no haya pasado
    * por ninguna acción (p.ej. todos all-in preflop: el resto del board se
-   * reparte sin más decisiones) y, si la mano terminó, deja ya formateado el
-   * resultado (mismo texto que el banner de la mesa). */
+   * reparte sin más decisiones), y si la mano terminó: deja ya formateado el
+   * resultado (mismo texto que el banner de la mesa) Y cierra con el
+   * resultado (ganó/perdió el bote el hero) todas las entradas de
+   * coachAdviceLog abiertas de esta mano — ver lib/coachAdvice.js. */
   const syncHandCompletion = useCallback(
     (data) => {
       updateCurrentHand((hand) => {
@@ -124,6 +156,10 @@ export function useTableSession(storageKey) {
         }
         return { ...hand, board, result, finished: !!data.finished };
       });
+      if (data.finished && data.winners_by_pot) {
+        const heroWonHand = data.winners_by_pot.some((pot) => pot.winners.includes(data.hero_seat));
+        setCoachAdviceLog((prev) => pairHandResult(prev, handNumberRef.current, heroWonHand));
+      }
     },
     [updateCurrentHand],
   );
@@ -131,10 +167,15 @@ export function useTableSession(storageKey) {
   const reset = useCallback(() => {
     setView(null);
     setHandHistory([]);
+    setCoachAdviceLog([]);
     handNumberRef.current = 0;
+    pendingAdviceIdRef.current = null;
     setError(null);
     setDealing(false);
-    if (storageKey) clearHandHistory(storageKey);
+    if (storageKey) {
+      clearHandHistory(storageKey);
+      clearCoachAdviceLog(storageKey);
+    }
   }, [storageKey]);
 
   /** Llamado por la UI (clic en la mesa) para saltar el reparto en curso. */
@@ -148,8 +189,13 @@ export function useTableSession(storageKey) {
         setError("La partida se perdió (probablemente el servidor de desarrollo se reinició). Volviendo al inicio…");
         setView(null);
         setHandHistory([]);
+        setCoachAdviceLog([]);
         handNumberRef.current = 0;
-        if (storageKey) clearHandHistory(storageKey);
+        pendingAdviceIdRef.current = null;
+        if (storageKey) {
+          clearHandHistory(storageKey);
+          clearCoachAdviceLog(storageKey);
+        }
         onHandLost?.();
         return;
       }
@@ -269,6 +315,15 @@ export function useTableSession(storageKey) {
   const actionAnimated = useCallback(
     async (handId, action, amount, onHandLost) => {
       if (!view) return null;
+      // Cierra (si existe) el consejo del coach que estaba pendiente de
+      // emparejar con ESTE turno, con la acción real que el hero acaba de
+      // elegir — antes de tocar loading/red, para que quede emparejado con
+      // el clic exacto y no con lo que pase después (ver lib/coachAdvice.js).
+      if (pendingAdviceIdRef.current != null) {
+        const pendingId = pendingAdviceIdRef.current;
+        pendingAdviceIdRef.current = null;
+        setCoachAdviceLog((prev) => pairHeroAction(prev, pendingId, action, amount));
+      }
       setLoading(true);
       setError(null);
       const prevView = view;
@@ -299,10 +354,50 @@ export function useTableSession(storageKey) {
     [view, handleFailure, appendActionToHistory, appendBoardToHistory, syncHandCompletion],
   );
 
+  // Pide el análisis del coach EN SEGUNDO PLANO cada vez que arranca un
+  // turno real del hero — independiente de si el panel "Ayuda" está abierto
+  // (ver docstring del hook y de lib/coachAdvice.js). `view.is_hero_turn`
+  // siempre pasa por `false` entre dos turnos reales del hero (las
+  // animaciones intermedias de handAnimation.js lo fuerzan así), así que un
+  // efecto que reacciona a ese cambio dispara exactamente una vez por
+  // decisión real, nunca de más.
+  useEffect(() => {
+    if (!view || !view.is_hero_turn || !view.hand_id) return undefined;
+    turnSeqRef.current += 1;
+    const mySeq = turnSeqRef.current;
+    const handId = view.hand_id;
+    const handNumber = handNumberRef.current;
+    let cancelled = false;
+    fetchTableCoach(handId)
+      .then((data) => {
+        if (cancelled) return;
+        coachAdviceIdRef.current += 1;
+        const id = coachAdviceIdRef.current;
+        const entry = { id, ...buildCoachAdviceEntry({ data, resolveName: resolveNameRef.current, handNumber }) };
+        setCoachAdviceLog((prev) => [...prev, entry]);
+        // Solo queda "pendiente de emparejar" si nadie más empezó un turno
+        // nuevo mientras esto calculaba (ver comentario largo en
+        // lib/coachAdvice.js) — si no, se guarda igual como histórico, pero
+        // no se empareja con la decisión siguiente por error.
+        if (mySeq === turnSeqRef.current) {
+          pendingAdviceIdRef.current = id;
+        }
+      })
+      .catch(() => {
+        // Silencioso: sin veredicto para esta decisión, se excluye del
+        // resumen de fin de partida (lib/sessionSummary.js).
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view?.is_hero_turn, view?.hand_id]);
+
   return {
     view,
     setView,
     handHistory,
+    coachAdviceLog,
     loading,
     animating,
     dealing,
