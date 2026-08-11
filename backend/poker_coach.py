@@ -1,0 +1,200 @@
+"""
+poker_coach.py — Coach v1: analiza la DECISIÓN ACTUAL del hero en una mano de
+mesa en vivo (poker_table.Hand) con números reales del motor
+(poker_engine.equity_vs_range / pot_odds / breakeven_bluff).
+
+Módulo de lógica PURA (sin FastAPI, testeable directamente) — el endpoint que
+lo expone vive en poker_table_api.py (mismo table_router / HandStore que el
+resto de la mesa), igual que poker_analysis.py separa el motor (poker_engine)
+del router.
+
+Reutiliza:
+  - poker_engine: equity_vs_range, pot_odds, breakeven_bluff, card_str (todo
+    exacto salvo equity_vs_range, que es una simulación Monte Carlo).
+  - poker_bot: GENERIC_RANGE (las 169 combinaciones de partida) y
+    chen_strength como vara de medir la fuerza preflop de un hand-code — NO
+    se inventa ningún sistema de rangos nuevo.
+  - poker_table: Hand / PlayerStatus (el estado de la mano ya en memoria).
+
+Estimación del rango del rival (v1, documentada — NO es un rango GTO real,
+es una heurística razonable para dar un número orientativo):
+  Se parte del universo completo de 169 hand-codes (poker_bot.GENERIC_RANGE),
+  ordenado por fuerza de Chen (poker_bot.chen_strength), y se recorta según
+  las acciones YA TOMADAS por el rival en ESTA mano (hand.actions_log):
+    - Si en algún momento subió (raise/all_in): se queda con el RAISE_RANGE_PCT
+      (15%) más fuerte — el rival mostró agresión, se asume un rango de
+      apertura/continuación fuerte.
+    - Si no subió nunca pero sí pagó (call) en algún momento: se queda con el
+      CALL_RANGE_PCT (40%) más ancho — pagar es una acción más pasiva/amplia
+      que subir.
+    - Si el rival solo ha pasado (check) o todavía no ha actuado en la mano:
+      no hay ninguna pista direccional de su fuerza -> se usa el rango
+      genérico COMPLETO (las 169 combinaciones), sin recortar.
+  El corte NUNCA se ensancha: una vez visto un raise, una acción pasiva
+  posterior no "perdona" ese rango (se prioriza la señal más fuerte vista).
+  Si hay MÁS DE UN rival activo (multiway), la equity se aproxima como si
+  fuera mano a mano contra el rival "más relevante" (ver pick_villain_seat) —
+  el resto de rivales se ignoran para este cálculo; esto se marca explícitamente
+  en la respuesta (`multiway: true`) para que el frontend pueda avisar de que
+  es una aproximación más floja que en un pote heads-up.
+"""
+
+from __future__ import annotations
+
+import poker_bot
+from poker_engine import breakeven_bluff, card_str, equity_vs_range, pot_odds
+from poker_table import Hand, PlayerStatus
+
+# Percentiles (sobre las 169 hand-codes, ordenadas por chen_strength) que
+# aproximan cada nivel de agresión mostrado por el rival — ver docstring del
+# módulo para el criterio completo.
+RAISE_RANGE_PCT = 0.15
+CALL_RANGE_PCT = 0.40
+
+# Tamaño "estándar" de subida usado para el breakeven de farol: 2/3 del bote
+# sobre la apuesta actual — mismo orden de magnitud que el bet_size típico de
+# un perfil TAG en poker_bot.PROFILE_PARAMS (0.62-0.70).
+STANDARD_RAISE_FRACTION = 2 / 3
+
+# Iteraciones del Monte Carlo de equity: más que las DEFAULT_POSTFLOP_ITERS de
+# los bots (200, pensadas para decidir cientos de veces por mano) porque aquí
+# es UNA sola llamada bajo demanda (el hero abre el panel de Ayuda), así que
+# se puede pagar más precisión sin notarse en la latencia.
+DEFAULT_COACH_ITERS = 3000
+
+_CHEN_SORTED_CODES = sorted(poker_bot.GENERIC_RANGE, key=poker_bot.chen_strength, reverse=True)
+
+
+def _top_pct_range(pct: float) -> list[str]:
+    n = max(1, round(len(_CHEN_SORTED_CODES) * pct))
+    return _CHEN_SORTED_CODES[:n]
+
+
+def estimate_villain_range(hand: Hand, villain_seat: int) -> tuple[list[str], str]:
+    """Ver docstring del módulo. Devuelve (lista_de_hand_codes, criterio_en_texto)."""
+    villain_actions = [a["action"] for a in hand.actions_log if a["seat"] == villain_seat]
+
+    if any(a in ("raise", "all_in") for a in villain_actions):
+        return _top_pct_range(RAISE_RANGE_PCT), (
+            f"El rival subió en algún momento de la mano -> se aproxima su rango al "
+            f"{int(RAISE_RANGE_PCT * 100)}% más fuerte de manos iniciales (heurística de Chen, v1)."
+        )
+    if "call" in villain_actions:
+        return _top_pct_range(CALL_RANGE_PCT), (
+            f"El rival solo ha pagado, sin subir -> se aproxima su rango al "
+            f"{int(CALL_RANGE_PCT * 100)}% más ancho de manos iniciales (heurística de Chen, v1)."
+        )
+    return list(poker_bot.GENERIC_RANGE), (
+        "El rival todavía no ha mostrado agresión ni ha pagado nada en esta mano "
+        "(solo ha pasado, o no le ha tocado actuar todavía) -> sin pista de su fuerza, "
+        "se usa el rango genérico completo (cualquier mano inicial)."
+    )
+
+
+def pick_villain_seat(hand: Hand, hero_seat: int) -> int | None:
+    """
+    Rival "más relevante" contra el que aproximar la equity como si fuera
+    mano a mano — ver docstring del módulo (nota sobre multiway).
+
+    1. Entre los rivales que TODAVÍA pueden retirarse (no están ya all-in —
+       relevante porque el breakeven de un farol no tiene sentido contra
+       alguien que no puede foldear), si el último agresor de la mano
+       (`hand.last_aggressor_seat`) es uno de ellos, es él: es quien está
+       presionando la decisión del hero ahora mismo.
+    2. Si no, el de ese mismo grupo con más fichas puestas en la calle
+       actual (`street_bet`) — el que más ha invertido ahora mismo.
+    3. Si NINGÚN rival puede ya retirarse (todos all-in), se aplica el mismo
+       criterio sobre el conjunto completo de rivales activos.
+    Devuelve None si el hero no tiene ningún rival activo (no debería ocurrir
+    si es su turno: la mano ya habría terminado por fold-out antes).
+    """
+    live = [s for s, p in hand.players.items() if s != hero_seat and p.status != PlayerStatus.FOLDED]
+    if not live:
+        return None
+    can_still_fold = [s for s in live if hand.players[s].status != PlayerStatus.ALL_IN]
+    pool = can_still_fold or live
+    if hand.last_aggressor_seat in pool:
+        return hand.last_aggressor_seat
+    pool.sort(key=lambda s: (-hand.players[s].street_bet, s))
+    return pool[0]
+
+
+def standard_raise_to(hand: Hand, legal: dict) -> float | None:
+    """Importe TOTAL (to_amount de Hand.apply_action) de una subida "estándar"
+    del hero: apuesta actual + 2/3 del bote, acotado a los límites legales de
+    hand.legal_actions(hero_seat) — mismo criterio de tamaño que ya usa
+    poker_bot._size_postflop_bet. None si el hero no puede subir ahora mismo
+    (p.ej. ya está comprometido con todo su stack solo para pagar)."""
+    if "raise" not in legal:
+        return None
+    min_to, max_to = legal["raise"]["min_to"], legal["raise"]["max_to"]
+    target = hand.current_bet + hand.pot_total() * STANDARD_RAISE_FRACTION
+    return max(min_to, min(round(target), max_to))
+
+
+def build_coach_response(hand: Hand, hero_seat: int) -> dict:
+    """Ensambla la respuesta completa del coach para la decisión ACTUAL del
+    hero. El caller (poker_table_api.py) es responsable de comprobar que
+    hand.current_seat == hero_seat y not hand.is_complete antes de llamar —
+    aquí se asume que hay una decisión real que analizar."""
+    hero = hand.players[hero_seat]
+    legal = hand.legal_actions(hero_seat)
+    to_call = max(0.0, hand.current_bet - hero.street_bet)
+    pot_before = hand.pot_total()
+
+    po = pot_odds(to_call, pot_before)
+
+    breakeven = None
+    raise_to = standard_raise_to(hand, legal)
+    if raise_to is not None:
+        bet_amount = raise_to - hero.street_bet
+        breakeven = {
+            "raise_to": raise_to,
+            "bet_amount": bet_amount,
+            **breakeven_bluff(bet_amount, pot_before),
+        }
+
+    active_villain_seats = [
+        s for s, p in hand.players.items() if s != hero_seat and p.status != PlayerStatus.FOLDED
+    ]
+    villain_seat = pick_villain_seat(hand, hero_seat)
+
+    equity = None
+    equity_note = None
+    if villain_seat is not None:
+        villain_range, criterion = estimate_villain_range(hand, villain_seat)
+        hero_cards = [card_str(c) for c in hero.hole_cards]
+        board = [card_str(c) for c in hand.board]
+        try:
+            eq = equity_vs_range(hero_cards, villain_range, board=board, iters=DEFAULT_COACH_ITERS)
+        except ValueError:
+            # El recorte estimado chocó con las cartas muertas (board/hero) y
+            # se quedó vacío -> mejor una estimación amplia que ningún número.
+            villain_range = list(poker_bot.GENERIC_RANGE)
+            criterion += (
+                " (el recorte estimado quedó vacío para este board -> se amplió al "
+                "rango genérico completo)."
+            )
+            eq = equity_vs_range(hero_cards, villain_range, board=board, iters=DEFAULT_COACH_ITERS)
+        equity = {**eq, "estimated": True}
+        equity_note = criterion
+
+    return {
+        "street": hand.street.value,
+        "board": [card_str(c) for c in hand.board],
+        "pot_total": pot_before,
+        "current_bet": hand.current_bet,
+        "hero_seat": hero_seat,
+        "hero_cards": [card_str(c) for c in hero.hole_cards],
+        "to_call": to_call,
+        "is_button": hero_seat == hand.button_seat,
+        "is_sb": hero_seat == hand.sb_seat,
+        "is_bb": hero_seat == hand.bb_seat,
+        "villain_seat": villain_seat,
+        "multiway": len(active_villain_seats) > 1,
+        "active_villain_seats": active_villain_seats,
+        "pot_odds": po,
+        "equity_vs_villain_range": equity,
+        "equity_estimation_note": equity_note,
+        "breakeven_standard_raise": breakeven,
+    }

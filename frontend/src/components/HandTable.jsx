@@ -4,9 +4,29 @@ import PlayTable from "./PlayTable";
 import PlayActionBar from "./PlayActionBar";
 import ActivityLog from "./ActivityLog";
 import TurnTimer from "./TurnTimer";
+import CoachPanel from "./CoachPanel";
 import { PLAY } from "@/constants/testIds";
 import { groupPotResults, formatPotGroupText, collectHighlightedCards } from "@/lib/potResults";
 import { useSoundPreference, playYourTurn, playWin, playLose } from "@/lib/sound";
+
+const HELP_OPEN_STORAGE_KEY = "pokerstatics.helpOpen";
+
+function loadHelpOpen() {
+  try {
+    return localStorage.getItem(HELP_OPEN_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveHelpOpen(open) {
+  try {
+    localStorage.setItem(HELP_OPEN_STORAGE_KEY, open ? "1" : "0");
+  } catch {
+    // Persistencia best-effort: si localStorage falla, el toggle sigue
+    // funcionando en memoria para el resto de la sesión.
+  }
+}
 
 const TABLE_ROW_HEIGHT = "440px";
 
@@ -43,8 +63,12 @@ export default function HandTable({
   onSkipDeal,
   totalSeats,
 }) {
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(loadHelpOpen);
   const [soundEnabled, toggleSound] = useSoundPreference();
+
+  useEffect(() => {
+    saveHelpOpen(helpOpen);
+  }, [helpOpen]);
   const potGroups = view.finished ? groupPotResults(view.winners_by_pot) : [];
   const highlightedCards = view.finished ? collectHighlightedCards(view.winners_by_pot) : null;
 
@@ -90,9 +114,13 @@ export default function HandTable({
           <HelpCircle className="w-3.5 h-3.5" /> Ayuda
         </button>
         {helpOpen && (
-          <div data-testid={PLAY.helpPanel} className="flex-1 glass-panel rounded-xl p-3">
+          <div data-testid={PLAY.helpPanel} className="flex-1 glass-panel rounded-xl p-3 overflow-y-auto">
             <div className="text-[10px] uppercase tracking-widest text-[#475569] mb-2">Coach</div>
-            <div className="text-xs text-[#475569] leading-snug">Panel de ayuda — próximamente</div>
+            <CoachPanel
+              handId={view.hand_id}
+              active={helpOpen && view.is_hero_turn && !view.finished}
+              players={view.players}
+            />
           </div>
         )}
       </div>

@@ -13,6 +13,9 @@ Endpoints:
   GET  /api/table/{hand_id}             -> estado actual visto por el hero
   POST /api/table/{hand_id}/action      -> aplica la acción del hero y vuelve
                                            a auto-avanzar los bots
+  GET  /api/table/{hand_id}/coach       -> análisis de la decisión ACTUAL del
+                                           hero (pot odds / breakeven / equity
+                                           estimada) — ver poker_coach.py
 
 Persistencia: en memoria (HandStore, dict a nivel de módulo keyed por hand_id).
 Es una app local de un jugador: no hace falta Mongo. HandStore está aislado en
@@ -52,6 +55,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 import poker_bot
+from poker_coach import build_coach_response
 from poker_engine import card_str
 from poker_table import Hand, HandError, PlayerState
 
@@ -276,6 +280,28 @@ async def get_hand(hand_id: str):
     except KeyError:
         raise HTTPException(status_code=404, detail="Mano no encontrada.")
     return {"hand_id": hand_id, **_hero_view(entry["hand"], entry["hero_seat"])}
+
+
+@table_router.get("/table/{hand_id}/coach")
+async def coach(hand_id: str):
+    """Análisis (pot odds / breakeven / equity estimada) de la decisión ACTUAL
+    del hero — ver poker_coach.build_coach_response. Solo tiene sentido si es
+    el turno del hero: si no lo es (o la mano ya terminó), no hay ninguna
+    decisión que analizar todavía."""
+    try:
+        entry = _STORE.get(hand_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Mano no encontrada.")
+
+    hand: Hand = entry["hand"]
+    hero_seat = entry["hero_seat"]
+
+    if hand.is_complete:
+        raise HTTPException(status_code=400, detail="La mano ya ha terminado.")
+    if hand.current_seat != hero_seat:
+        raise HTTPException(status_code=400, detail="No es el turno del hero.")
+
+    return {"hand_id": hand_id, **build_coach_response(hand, hero_seat)}
 
 
 @table_router.post("/table/{hand_id}/action")

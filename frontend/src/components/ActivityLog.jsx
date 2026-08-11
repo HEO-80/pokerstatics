@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef } from "react";
 import { Trophy } from "lucide-react";
 import { seatName } from "@/lib/table";
 import { STREET_ORDER } from "@/lib/handHistory";
-import { SUIT_META } from "@/lib/poker";
+import { cardGlyph } from "@/lib/cardGlyphs";
 
 /**
  * `entry.raiseNumber` (adjuntado en handAnimation.js/useTableSession.js al
@@ -49,30 +49,15 @@ const ACTION_LOG_COLOR = {
   all_in: "text-[#F59E0B]",
 };
 
-// SUIT_META.color está pensado para las cartas de la MESA (fondo blanco), así
-// que picas/tréboles usan un negro casi puro (#0F1115) — sobre el fondo
-// oscuro del panel de Actividad ese mismo negro se funde y se vuelve
-// ilegible. Aquí, solo para el log, se sustituye por un gris claro; los
-// palos rojos (corazones/diamantes) se quedan igual porque ya contrastan
-// bien sobre oscuro.
-const LOG_SUIT_COLOR = { s: "#E2E8F0", c: "#E2E8F0", h: "#EF4444", d: "#EF4444" };
-
-function cardLabel(card) {
-  if (!card) return "";
-  const rank = card[0];
-  const suit = SUIT_META[card[1]];
-  return { rank, symbol: suit?.symbol ?? card[1], color: LOG_SUIT_COLOR[card[1]] ?? suit?.color };
-}
-
 /** Cartas en línea con su símbolo de palo (y color rojo/gris claro para que
- * los cuatro palos se lean sobre el fondo oscuro), usado tanto para "Tus
- * cartas" como para los reveals de board dentro de una mano del historial de
- * Actividad. */
+ * los cuatro palos se lean sobre el fondo oscuro, ver lib/cardGlyphs.js),
+ * usado tanto para "Tus cartas" como para los reveals de board dentro de una
+ * mano del historial de Actividad. */
 function CardRow({ cards }) {
   return (
     <span className="inline-flex gap-1.5">
       {cards.map((c, i) => {
-        const { rank, symbol, color } = cardLabel(c);
+        const { rank, symbol, color } = cardGlyph(c);
         return (
           <span key={i} className="font-mono-poker font-bold" style={{ color }}>
             {rank}

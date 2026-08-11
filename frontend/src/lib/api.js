@@ -58,3 +58,8 @@ export async function sendTableAction(handId, action, amount) {
   const { data } = await client.post(`/table/${handId}/action`, { action, amount });
   return data;
 }
+
+export async function fetchTableCoach(handId) {
+  const { data } = await client.get(`/table/${handId}/coach`);
+  return data;
+}
