@@ -1,16 +1,17 @@
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Swords, RotateCw, LogOut, Skull, TrendingUp, Trophy, Users } from "lucide-react";
+import { Swords, RotateCw, LogOut, ListOrdered, Skull, TrendingUp, Trophy, Users } from "lucide-react";
 import HandTable from "@/components/HandTable";
 import ActivityLog from "@/components/ActivityLog";
 import SessionSummary from "@/components/SessionSummary";
+import TournamentRankingPanel from "@/components/TournamentRankingPanel";
 import { createTableHand, simulateMttRound } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { TOURNAMENT } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
 import { pickRandomNames } from "@/lib/playerNames";
-import { sampleFieldStack, createNamePool } from "@/lib/mtt";
+import { evolveFieldStacks, rescaleStacksToSum, eliminateLowStacks, buildRanking } from "@/lib/mtt";
 
 // Modo Torneo — MTT de verdad (100/500/1000 inscritos), hasta la mesa final.
 //
@@ -18,29 +19,52 @@ import { sampleFieldStack, createNamePool } from "@/lib/mtt";
 // mesa/ciegas que Sit&Go: asientos fijos, quien llega a 0 se va de la mesa,
 // se reparte con los supervivientes). El RESTO del campo (todo lo que no es
 // la mesa del hero) NO se juega mano a mano — es inviable simular 1000
-// personas — se lleva como un simple contador (`fieldPoolRef`) que baja cada
-// ronda según un modelo estadístico agregado que vive en el BACKEND
-// (backend/mtt_simulation.py, expuesto vía POST /api/mtt/round — ver
-// simulateMttRound en lib/api.js), con tests en pytest. Este archivo no
-// decide CUÁNTA gente cae en el campo, solo aplica el número que devuelve el
-// backend.
+// personas — se lleva como una lista de {name, stack} por superviviente
+// (`fieldPlayersRef`, ver más abajo) cuyo TAMAÑO baja cada ronda según un
+// modelo estadístico agregado que vive en el BACKEND (backend/mtt_simulation.py,
+// expuesto vía POST /api/mtt/round — ver simulateMttRound en lib/api.js),
+// con tests en pytest. Este archivo no decide CUÁNTA gente cae en el campo
+// (eso lo dice el backend), solo A QUIÉN le toca y cómo evolucionan los
+// stacks de quienes siguen vivos — ver sección CLASIFICACIÓN más abajo.
 //
 // "Juntar mesas": cada vez que un asiento de la mesa del hero queda libre
 // (alguien real se fue a 0) y todavía queda campo, se sienta ahí un
-// superviviente SIMULADO (nombre nuevo, stack ~ la media del campo — ver
-// lib/mtt.js) en vez de dejar la mesa corta. Así la mesa del hero se
-// mantiene llena mientras haya campo del que tirar (igual que el balanceo de
-// mesas de un MTT real) y solo empieza a encogerse de verdad cuando el campo
-// se agota — momento en el que, por construcción, se ha llegado a la mesa
-// final (<=9 supervivientes en total, mesa del hero incluida).
+// superviviente SIMULADO REAL — se saca directamente de `fieldPlayersRef`
+// (su nombre y SU stack, ya simulados, ver lib/mtt.js) en vez de inventar
+// uno nuevo. Así la mesa del hero se mantiene llena mientras haya campo del
+// que tirar (igual que el balanceo de mesas de un MTT real) y solo empieza
+// a encogerse de verdad cuando el campo se agota — momento en el que, por
+// construcción, se ha llegado a la mesa final (<=9 supervivientes en total,
+// mesa del hero incluida).
+//
+// CLASIFICACIÓN: a diferencia de la primera versión (que solo llevaba un
+// CONTADOR del campo), ahora `fieldPlayersRef` trackea un stack individual
+// por cada superviviente simulado — imprescindible para poder ordenar y
+// mostrar un ranking de verdad. Cada ronda (ver nextHand):
+//   1. evolveFieldStacks: ruido multiplicativo por jugador (sube/baja, no
+//      se queda congelado).
+//   2. El backend (sin cambios, /api/mtt/round) sigue decidiendo CUÁNTOS
+//      caen esta ronda — el modelo agregado de mtt_simulation.py no se
+//      toca, solo se usa el número.
+//   3. eliminateLowStacks decide A QUIÉN le toca, con más probabilidad
+//      cuanto más corto sea su stack (no determinista).
+//   4. rescaleStacksToSum reescala a los supervivientes para que su suma
+//      cuadre EXACTO con las fichas reales que quedan fuera de la mesa del
+//      hero (inscritos×stack inicial − fichas reales en su mesa) — las
+//      fichas de quien cae quedan así absorbidas por el resto del campo,
+//      igual que en un torneo real (las fichas nunca desaparecen).
+// Con esos datos, buildRanking (lib/mtt.js) combina mesa real + campo
+// simulado y calcula el puesto EXACTO del hero (ya no es una fórmula
+// aproximada) — ver TournamentRankingPanel.jsx para cómo se pinta.
 //
 // INVARIANTE que mantiene todo el modelo, ronda a ronda:
-//   remainingRef.current === (asientos ocupados en la mesa del hero) + fieldPoolRef.current
+//   remainingRef.current === (asientos ocupados en la mesa del hero) + fieldPlayersRef.current.length
 // Los busts reales de la mesa del hero bajan el primer sumando; el modelo
-// del backend baja fieldPoolRef; "juntar mesas" solo MUEVE una unidad del
-// segundo sumando al primero (remainingRef no cambia). Por eso nunca hace
-// falta reconciliar nada aparte: basta con no romper la invariante en cada
-// paso.
+// del backend baja el segundo (eliminateLowStacks aplica exactamente ese
+// número); "juntar mesas" solo MUEVE una entrada del segundo sumando al
+// primero (remainingRef no cambia). Por eso nunca hace falta reconciliar
+// nada aparte: basta con no romper la invariante en cada paso.
+const RANKING_TOP_N = 20;
 const HERO_SEAT = 0;
 const TOTAL_SEATS = 9;
 const ENTRANTS_OPTIONS = [100, 500, 1000];
@@ -66,6 +90,8 @@ export default function Tournament() {
   const [estimatedPosition, setEstimatedPosition] = useState(null);
   const [finalPosition, setFinalPosition] = useState(null);
   const [roundPhase, setRoundPhase] = useState("early"); // early|mid|bubble|final_table, del último /mtt/round
+  const [ranking, setRanking] = useState({ top: [], total: 0, heroRank: null, heroInTop: true, heroEntry: null });
+  const [showRanking, setShowRanking] = useState(false);
 
   // null = "todavía no se ha jugado ninguna mano de esta partida" -> el
   // próximo dealHand() debe elegir un botón al azar. Una vez hay un valor,
@@ -78,11 +104,13 @@ export default function Tournament() {
   const totalEntrantsRef = useRef(0);
   const startingStackRef = useRef(0);
   const remainingRef = useRef(0);
-  const fieldPoolRef = useRef(0);
-  const avgStackRef = useRef(0);
+  // Campo simulado: un {name, stack} por superviviente NO sentado en la
+  // mesa del hero (ver comentario de cabecera y lib/mtt.js). Sustituye al
+  // antiguo contador `fieldPoolRef` — el conteo es ahora simplemente
+  // `fieldPlayersRef.current.length`.
+  const fieldPlayersRef = useRef([]);
   const bubbleAnnouncedRef = useRef(false);
   const finalTableAnnouncedRef = useRef(false);
-  const namePoolRef = useRef(createNamePool([]));
 
   // Nombre ACTUAL de cada una de las 9 sillas físicas de la mesa del hero
   // (silla 0 = hero, fija toda la partida). A diferencia de Sit&Go, esto SÍ
@@ -161,29 +189,37 @@ export default function Tournament() {
     const totalEntrants = Number(lobby.totalEntrants);
     const startingStack = Number(lobby.startingStack);
     const heroName = lobby.heroName.trim() || "Hero";
-    // Un pool de nombres para TODA la partida: los 8 primeros arrancan
-    // sentados como rivales, el resto se reserva para ir sentando
-    // supervivientes simulados según se rellenan huecos (ver nextHand). Con
-    // torneos de hasta 1000 inscritos y ~96 nombres de pila disponibles, el
-    // pool se agota mucho antes del final — createNamePool cae a
-    // "JugadorN" a partir de ahí (ver lib/mtt.js).
-    const namesForGame = pickRandomNames(96);
-    chairNamesRef.current = [heroName, ...namesForGame.slice(0, TOTAL_SEATS - 1)];
-    namePoolRef.current = createNamePool(namesForGame.slice(TOTAL_SEATS - 1));
+    // Nombres de la mesa del hero (8 rivales iniciales) y del campo
+    // simulado entero (hasta ~991 con un torneo de 1000) — llamadas
+    // independientes a pickRandomNames, cada una cae a "JugadorN" en
+    // cuanto agota los ~96 nombres de pila disponibles (ver
+    // lib/playerNames.js). Todo el campo arranca con el mismo stack
+    // inicial, igual que la mesa del hero — la variación llega ronda a
+    // ronda con evolveFieldStacks (ver nextHand).
+    chairNamesRef.current = [heroName, ...pickRandomNames(TOTAL_SEATS - 1)];
     aliveSlotsRef.current = Array.from({ length: TOTAL_SEATS }, (_, i) => i);
+    const fieldCount = Math.max(0, totalEntrants - TOTAL_SEATS);
+    fieldPlayersRef.current = pickRandomNames(fieldCount).map((name) => ({ name, stack: startingStack }));
 
     totalEntrantsRef.current = totalEntrants;
     startingStackRef.current = startingStack;
     remainingRef.current = totalEntrants;
-    fieldPoolRef.current = Math.max(0, totalEntrants - TOTAL_SEATS);
-    avgStackRef.current = startingStack;
     bubbleAnnouncedRef.current = false;
     finalTableAnnouncedRef.current = false;
     setRemaining(totalEntrants);
     setAvgStack(startingStack);
-    setEstimatedPosition(null);
     setFinalPosition(null);
     setRoundPhase("early");
+    setShowRanking(false);
+
+    const initialHeroTableEntries = chairNamesRef.current.map((name, chair) => ({
+      name,
+      stack: startingStack,
+      isHero: chair === 0,
+    }));
+    const initialRanking = buildRanking(initialHeroTableEntries, fieldPlayersRef.current, RANKING_TOP_N);
+    setRanking(initialRanking);
+    setEstimatedPosition(initialRanking.heroRank);
 
     const cfg = { startingStack, totalEntrants };
     setConfig(cfg);
@@ -218,23 +254,34 @@ export default function Tournament() {
         return;
       }
 
-      // 2) Ronda del modelo de eliminación del campo (backend). Se llama
-      // siempre que el hero sigue vivo (incluso ya en mesa final: el
-      // backend simplemente devuelve 0 eliminados ahí, pero de paso
-      // refresca stack medio / posición estimada para el HUD).
+      // 2) Los stacks del campo EVOLUCIONAN esta ronda (ruido multiplicativo
+      // por jugador — sube o baja, nunca se queda congelado, ver lib/mtt.js)
+      // antes de decidir quién cae, para que la elección de eliminados (paso
+      // 4) ya vea stacks actualizados y el orden relativo pueda cambiar de
+      // ronda en ronda.
+      const heroTableChips = [...aliveChairs.values()].reduce((a, b) => a + b, 0);
+      const fieldTargetSum = Math.max(
+        0,
+        totalEntrantsRef.current * startingStackRef.current - heroTableChips,
+      );
+      const evolvedStacks = evolveFieldStacks(fieldPlayersRef.current.map((p) => p.stack));
+      fieldPlayersRef.current = fieldPlayersRef.current.map((p, i) => ({ ...p, stack: evolvedStacks[i] }));
+
+      // 3) Ronda del modelo de eliminación del campo (backend, sin cambios:
+      // sigue decidiendo solo CUÁNTOS caen). Se llama siempre que el hero
+      // sigue vivo (incluso ya en mesa final: el backend simplemente
+      // devuelve 0 eliminados ahí, pero de paso refresca el stack medio para
+      // el HUD).
       const heroStack = aliveChairs.get(0);
       const round = await simulateMttRound({
         totalEntrants: totalEntrantsRef.current,
         remainingTotal: remainingRef.current,
-        fieldPool: fieldPoolRef.current,
+        fieldPool: fieldPlayersRef.current.length,
         startingStack: startingStackRef.current,
         heroStack,
       });
-      fieldPoolRef.current = round.field_pool_after;
       remainingRef.current = round.remaining_total_after;
-      avgStackRef.current = round.avg_stack;
       setAvgStack(round.avg_stack);
-      setEstimatedPosition(round.estimated_rank);
       setRoundPhase(round.phase);
 
       if (round.is_bubble && !bubbleAnnouncedRef.current) {
@@ -246,13 +293,23 @@ export default function Tournament() {
         toast.success(`¡Mesa final! Quedan ${round.remaining_total_after} jugadores.`);
       }
 
-      // 3) "Juntar mesas": rellenar cada silla libre de la mesa del hero con
-      // un superviviente simulado, mientras quede campo del que tirar.
+      // 4) A QUIÉN le toca caer de esos `round.eliminated` (más probable
+      // cuanto más corto su stack), y reescalado final para conservar el
+      // total de fichas EXACTO fuera de la mesa del hero — las fichas de
+      // quien cae quedan absorbidas por el resto del campo (ver cabecera).
+      const { survivors } = eliminateLowStacks(fieldPlayersRef.current, round.eliminated);
+      const rescaledStacks = rescaleStacksToSum(survivors.map((p) => p.stack), fieldTargetSum);
+      fieldPlayersRef.current = survivors.map((p, i) => ({ ...p, stack: rescaledStacks[i] }));
+
+      // 5) "Juntar mesas": rellenar cada silla libre de la mesa del hero
+      // sacando un superviviente REAL del campo (su nombre y SU stack ya
+      // simulados), mientras quede campo del que tirar.
       for (let chair = 0; chair < TOTAL_SEATS; chair++) {
-        if (!aliveChairs.has(chair) && fieldPoolRef.current > 0) {
-          chairNamesRef.current[chair] = namePoolRef.current.next();
-          aliveChairs.set(chair, sampleFieldStack(avgStackRef.current));
-          fieldPoolRef.current -= 1;
+        if (!aliveChairs.has(chair) && fieldPlayersRef.current.length > 0) {
+          const idx = Math.floor(Math.random() * fieldPlayersRef.current.length);
+          const [joined] = fieldPlayersRef.current.splice(idx, 1);
+          chairNamesRef.current[chair] = joined.name;
+          aliveChairs.set(chair, joined.stack);
         }
       }
 
@@ -264,7 +321,17 @@ export default function Tournament() {
       aliveSlotsRef.current = orderedChairs;
       setRemaining(remainingRef.current);
 
-      if (orderedChairs.length === 1 && fieldPoolRef.current === 0) {
+      // 6) Clasificación: mesa real (ya actualizada) + campo simulado.
+      const heroTableEntries = orderedChairs.map((chair) => ({
+        name: chairNamesRef.current[chair],
+        stack: aliveChairs.get(chair),
+        isHero: chair === 0,
+      }));
+      const newRanking = buildRanking(heroTableEntries, fieldPlayersRef.current, RANKING_TOP_N);
+      setRanking(newRanking);
+      setEstimatedPosition(newRanking.heroRank);
+
+      if (orderedChairs.length === 1 && fieldPlayersRef.current.length === 0) {
         setPhase("won");
         return;
       }
@@ -280,6 +347,7 @@ export default function Tournament() {
     setPhase("lobby");
     reset();
     setConfig(null);
+    setShowRanking(false);
   };
 
   const applyAction = (action, amount) => {
@@ -317,7 +385,20 @@ export default function Tournament() {
           </h1>
         </div>
         {phase === "playing" && view && (
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-testid={TOURNAMENT.rankingToggleBtn}
+              aria-pressed={showRanking}
+              onClick={() => setShowRanking((v) => !v)}
+              className={`px-4 py-2 rounded-lg border text-sm font-display uppercase tracking-wider transition-colors inline-flex items-center gap-2 ${
+                showRanking
+                  ? "bg-[#8B5CF6]/15 border-[#8B5CF6]/50 text-[#8B5CF6]"
+                  : "border-white/12 text-white hover:bg-white/5"
+              }`}
+            >
+              <ListOrdered className="w-4 h-4" /> Clasificación
+            </button>
             <button
               data-testid={TOURNAMENT.exitBtn}
               onClick={() => setPhase("exited")}
@@ -328,6 +409,15 @@ export default function Tournament() {
           </div>
         )}
       </div>
+
+      {showRanking && phase === "playing" && view && (
+        <TournamentRankingPanel
+          ranking={ranking}
+          remaining={remaining}
+          totalEntrants={config?.totalEntrants}
+          onClose={() => setShowRanking(false)}
+        />
+      )}
 
       {phase === "playing" && view && (
         <div
@@ -346,7 +436,7 @@ export default function Tournament() {
             Stack medio: <span className="text-white font-bold">{Math.round(avgStack)}</span>
           </div>
           <div data-testid={TOURNAMENT.hudPosition} className="text-[#94A3B8]">
-            Posición ~<span className="text-white font-bold">#{estimatedPosition ?? "—"}</span>
+            Posición <span className="text-white font-bold">#{estimatedPosition ?? "—"}</span>
           </div>
           <div
             className="flex items-center gap-1.5"
@@ -382,7 +472,8 @@ export default function Tournament() {
         >
           <div className="col-span-2 md:col-span-4 text-xs text-[#94A3B8]">
             Torneo MTT: te sientas en una mesa real de 9 jugadores; el resto del campo se simula
-            estadísticamente (ver HUD "Posición ~#N" durante la partida). Ciegas iniciales{" "}
+            estadísticamente (ver HUD "Posición #N" y el botón "Clasificación" durante la partida). Ciegas
+            iniciales{" "}
             <span className="text-white font-mono-poker font-bold">
               {blindsForLevel(lobby.startLevel).sb}/{blindsForLevel(lobby.startLevel).bb}
             </span>{" "}

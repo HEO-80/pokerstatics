@@ -100,6 +100,9 @@ export const TOURNAMENT = {
   hudAvgStack: "tournament-hud-avg-stack",
   bubbleBanner: "tournament-bubble-banner",
   finalTableBanner: "tournament-final-table-banner",
+  rankingToggleBtn: "tournament-ranking-toggle-btn",
+  rankingPanel: "tournament-ranking-panel",
+  rankingHeroRow: "tournament-ranking-hero-row",
 };
 
 export const SITANDGO = {
