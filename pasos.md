@@ -324,3 +324,66 @@ Y aquí está la buena noticia: lo que estás construyendo — un entrenador de 
 Mi consejo honesto: el entrenador es tu producto real y viable. Termínalo, hazlo bueno, y si algún día quieres ir a lo del dinero real, eso sería buscar socios, inversión y un equipo legal — no un paso más de este proyecto. No mezcles las dos cosas, porque lo segundo puede paralizar o hundir lo primero.
 
 Para lo inmediato: cuando termines el log de actividad, mi propuesta es hacer esa revisión de pestañas que dices (que cada una tenga su función clara), porque es un buen momento para ordenar antes de meter el coach. ¿Te parece que después del log vayamos a por eso, o prefieres seguir con la persistencia/coach y dejamos la revisión de pestañas para más adelante?
+
+
+# PREFLOPLAB — PROGRESO
+
+## MOTOR Y BACKEND (núcleo) — ✅ COMPLETO
+- ✅ Motor de cálculo (equity / pot odds / breakeven) — verificado
+- ✅ Motor de una mano (reparto, apuestas, side-pots)
+- ✅ IA de los bots (perfiles nit/tag/lag/station, equity)
+- ✅ Endpoint de la mesa (jugable por API, cartas ocultas)
+
+## MESA VISUAL — ✅ COMPLETO
+- ✅ Mesa ovalada, cartas al centro, botones sin scroll, ancho completo
+- ✅ Modos separados: Práctica / Torneo / Sit&Go (pestañas)
+- ✅ Orden horario + showdown claro (cartas ganadoras, reparto, side-pots)
+- ✅ Fichas de apuesta y pilas por jugador según stack
+- ✅ Reparto animado desde el centro + reverso de carta + board animado
+- ✅ Dealer aleatorio y rotación correcta
+- ✅ Ciegas que suben (por vuelta del botón) + nivel inicial elegible
+- ✅ Asientos fijos + nombres reales + nombre del hero
+- ✅ Log de actividad continuo, numerado y con argot de poker
+- ✅ Persistencia del historial (localStorage)
+- ✅ Sonidos on/off + temporizador de turno con auto-fold + pausa
+- ✅ Toggles Actividad / Coach IA a la derecha (solo uno a la vez)
+
+## EL COACH — ✅ COMPLETO
+- ✅ Coach v1: pot odds, equity, breakeven, perfil del rival, recomendación por color
+- ✅ Resumen por mano y por partida (distingue DECISIÓN de RESULTADO)
+- ✅ Coach v2 con IA (Gemini): razonamiento estratégico bajo demanda
+- ✅ Voz del coach (Web Speech API, toggle)
+
+## TORNEO — ✅ COMPLETO
+- ✅ Multi-mesa simulado (100/500/1000) hasta mesa final
+- ✅ Ranking / clasificación con stacks simulados (fichas se conservan)
+- ✅ Premios escalonados + burbuja + buy-in ficticio
+
+## PUNTOS — ✅ COMPLETO
+- ✅ Paso 6: puntos y niveles por calidad de decisión (racha, curva de niveles)
+
+## EN CURSO / PENDIENTE (por orden)
+- 🔨 IA de bots más realista (que defiendan ciegas, no foldeen todo) ← AHORA
+- ⬜ Botones de voz separados (IA arriba / consejo abajo, icono que no sea micro)
+- ⬜ Perfiles de bots mezclados en el Torneo (pros + amateurs)
+- ⬜ Glosario de términos (nit/tag/lag/station, +EV/-EV, etc.)
+- ⬜ Orden de apuestas + re-raise mínimo (verificar reglas NLHE)
+- ⬜ Voz de IA realista (si la del navegador no convence — de pago)
+- ⬜ Registro / login (guardar progreso y torneos por persona)
+
+## BUGS RESUELTOS (registro)
+- ✅ "Mano no encontrada" (era el --reload borrando memoria)
+- ✅ Stacks con decimales en el torneo (redondeo)
+- ✅ Evaluador de color/escalera → NO era bug (verificado con 20k fuzz)
+
+## MÁS ADELANTE
+- ⬜ Extraer charts de PokerCoaching (PDF) como más datos de rangos
+- ⬜ Limpiar residuos de Emergent (test_scenarios_api.py)
+
+## PROYECTO NUEVO (separado)
+- ⬜ SatoshisTable — plataforma poker Web3 con smart contracts (ver su .md)
+
+## NOTAS
+- Backend PARA JUGAR: uvicorn server:app --port 8000 (SIN --reload)
+- Frontend: cd frontend && yarn start · Mongo: docker start mongo-preflop
+- Commit tras cada pieza que funcione.

@@ -25,37 +25,78 @@ from poker_table import HandError, Street
 # ---------------------------------------------------------------------------
 # Perfiles de bot
 # ---------------------------------------------------------------------------
-# call_min / raise_min: fuerza (0..1) mínima para pagar / subir preflop.
-#   Facing_raise suma un extra a estos umbrales (hace falta más para pagar o
-#   re-subir una subida que para abrir o completar la ciega).
+# raise_min: fuerza (0..1) mínima para abrir/completar la ciega o resubir
+#   preflop. Facing_raise suma un extra (FACING_RAISE_RAISE_BUMP) para
+#   resubir una subida — hace falta más fuerza que para abrir de cero.
+#   (Pagar una subida preflop YA NO usa un umbral de fuerza fijo: usa pot
+#   odds reales, ver _preflop_decision_no_range / call_margin más abajo.)
 # position_spread: cuánta fuerza extra da la mejor posición (menos rivales
 #   por detrás en esta ronda).
-# value_thresh / call_margin / bluff_freq / bet_size: postflop, ver _postflop_decision.
+# call_margin: colchón de equity que cada perfil exige POR ENCIMA de lo que
+#   pide el bote — se reutiliza tal cual en pot odds preflop (defensa de
+#   ciegas) y en pot odds postflop (_postflop_decision): los stations casi
+#   no necesitan margen (pagan con casi cualquier cosa), los nits sí.
+# value_thresh / bluff_freq / bet_size: postflop, ver _postflop_decision.
 PROFILE_PARAMS = {
     "nit": dict(
-        call_min=0.55, raise_min=0.80, position_spread=0.05,
+        raise_min=0.80, position_spread=0.05,
         value_thresh=0.65, call_margin=0.02, bluff_freq=0.02, bet_size=0.66,
         open_size_bb=2.2,
     ),
     "tag": dict(
-        call_min=0.35, raise_min=0.62, position_spread=0.12,
+        raise_min=0.62, position_spread=0.12,
         value_thresh=0.55, call_margin=0.04, bluff_freq=0.10, bet_size=0.70,
         open_size_bb=2.5,
     ),
     "lag": dict(
-        call_min=0.22, raise_min=0.45, position_spread=0.20,
+        raise_min=0.45, position_spread=0.20,
         value_thresh=0.45, call_margin=0.08, bluff_freq=0.22, bet_size=0.80,
         open_size_bb=3.0,
     ),
     "station": dict(
-        call_min=0.05, raise_min=0.88, position_spread=0.05,
+        raise_min=0.88, position_spread=0.05,
         value_thresh=0.50, call_margin=0.25, bluff_freq=0.01, bet_size=0.55,
         open_size_bb=2.5,
     ),
 }
 
-FACING_RAISE_CALL_BUMP = 0.15
 FACING_RAISE_RAISE_BUMP = 0.10
+
+# ---------------------------------------------------------------------------
+# Defensa preflop por POT ODDS (en vez de un umbral de fuerza fijo que
+# ignoraba el tamaño de la subida — ver docstring de _preflop_decision_no_range
+# para la medición que confirmó el problema: la BB defendía ~1-10% frente a
+# una subida de 2-2.5x con los umbrales fijos antiguos, cuando el precio real
+# (pot odds) pide bastante menos equity que eso).
+#
+# _preflop_equity_estimate() aproxima la equity heads-up de una mano preflop
+# a partir de su fuerza ajustada (Chen + posición, 0..1) SIN Monte Carlo
+# (llamar a equity_vs_range en cada decisión preflop sería carísimo con
+# varios bots por mano) — interpola linealmente entre la peor mano posible
+# (PREFLOP_EQUITY_FLOOR, ~contra el rango de quien ha subido, no contra una
+# mano al azar: por eso el suelo es más bajo que la equity real de 72o
+# contra un rango uniforme) y la mejor (FLOOR+SPAN, AA). Es una heurística
+# barata y monótona, no una equity exacta — para comparar contra pot odds
+# basta con que ordene las manos razonablemente bien.
+PREFLOP_EQUITY_FLOOR = 0.02
+PREFLOP_EQUITY_SPAN = 0.80  # FLOOR + SPAN = 0.82 con adjusted=1.0 (mano top)
+
+# Varianza humana (Tarea 4): ruido simétrico sobre la comparación de
+# equity/fuerza, UN solo sorteo por decisión (se reutiliza tanto para el
+# umbral de resubida como para la comparación de pot odds) — así la
+# decisión entera de esta mano concreta queda "de humor" ligeramente
+# optimista o pesimista, en vez de que cada bot sea un autómata que decide
+# siempre exactamente igual en el mismo spot.
+PREFLOP_DECISION_JITTER = 0.05
+
+# Varianza en el TAMAÑO de la subida (Tarea 4): los humanos no abren
+# siempre a exactamente 2.5x, aunque esa sea su referencia — ±10%.
+PREFLOP_SIZE_JITTER = 0.10
+
+
+def _preflop_equity_estimate(adjusted: float) -> float:
+    """Ver docstring de arriba (Defensa preflop por POT ODDS)."""
+    return PREFLOP_EQUITY_FLOOR + PREFLOP_EQUITY_SPAN * adjusted
 
 # Rango "genérico" del rival para medir equity postflop: las 169 combinaciones
 # de partida (equivale a "equity vs cualquier mano al azar"), una vara de
@@ -167,13 +208,17 @@ def _round_and_clamp(target: float, min_to: float, max_to: float) -> float:
     return max(min_to, min(target, max_to))
 
 
-def _size_preflop_raise(hand, seat, legal, profile) -> tuple:
+def _size_preflop_raise(hand, seat, legal, profile, rng=None) -> tuple:
     if "raise" not in legal:
         return ("all_in", None)
     min_to, max_to = legal["raise"]["min_to"], legal["raise"]["max_to"]
     params = PROFILE_PARAMS[profile]
     opening = hand.current_bet <= hand.bb
     target = params["open_size_bb"] * hand.bb if opening else hand.current_bet * 3
+    if rng is not None:
+        # Varianza humana en el tamaño (Tarea 4): ±10%, no siempre el mismo
+        # múltiplo exacto de bote/BB.
+        target *= 1 + rng.uniform(-PREFLOP_SIZE_JITTER, PREFLOP_SIZE_JITTER)
     target = _round_and_clamp(target, min_to, max_to)
     if target >= max_to:
         return ("all_in", None)
@@ -196,28 +241,70 @@ def _size_postflop_bet(hand, seat, legal, profile) -> tuple:
 # Decisión preflop
 # ---------------------------------------------------------------------------
 def _preflop_decision_no_range(hand, seat, profile, rng) -> tuple:
+    """
+    MEDIDO ANTES de este cambio (2000 manos, ver PASO0_MEASUREMENTS.md):
+    con un umbral de fuerza FIJO para pagar una subida (independiente de su
+    tamaño), la BB defendía frente a una subida pequeña (2.2-2.5x) solo el
+    1.3% de las veces con perfil "nit", el 10.5% con "tag" — la ciega
+    prácticamente nunca defendía, exactamente el bug reportado. La causa:
+    ese umbral no miraba en ningún momento el TAMAÑO de la subida (2.2x y
+    2.5x daban resultados idénticos).
+
+    Ahora, al enfrentar una subida (to_call > 0), la decisión de
+    pagar/foldear usa POT ODDS reales (to_call/pot, igual que
+    poker_engine.pot_odds ya usa en el coach) comparadas con una equity
+    ESTIMADA de la mano (_preflop_equity_estimate, sin Monte Carlo) — así
+    una subida pequeña (poca equity necesaria) se paga con un rango mucho
+    más ancho que una subida grande, en vez de un único umbral que ignoraba
+    el precio. `params["call_margin"]` (ya existente para postflop) sigue
+    diferenciando perfiles: los stations pagan con casi cualquier margen,
+    los nits necesitan más colchón.
+
+    Abrir (to_call<=0) y resubir con manos fuertes siguen usando el umbral
+    de fuerza de siempre (raise_min) — ahí SÍ tiene sentido un umbral de
+    fuerza fijo (no hay "precio" que pagar, es una apuesta propia). Con
+    manos que no llegan a pagar ni a resubir de valor, hay una resubida de
+    farol ocasional (Tarea 3) en vez de foldear siempre.
+
+    `jitter` (un único sorteo por decisión, Tarea 4 "varianza humana") se
+    aplica igual al umbral de resubida que a la equity estimada — dos bots
+    con la MISMA mano, perfil y situación no tienen por qué decidir siempre
+    igual.
+    """
     params = PROFILE_PARAMS[profile]
     player = hand.players[seat]
     code = hole_cards_to_code(player.hole_cards)
     strength = chen_strength(code)
     adjusted = min(1.0, strength + _position_factor(hand) * params["position_spread"])
+    jitter = rng.uniform(-PREFLOP_DECISION_JITTER, PREFLOP_DECISION_JITTER)
 
     to_call = hand.current_bet - player.street_bet
     legal = hand.legal_actions(seat)
 
     if to_call <= 0:
-        if adjusted >= params["raise_min"]:
-            return _size_preflop_raise(hand, seat, legal, profile)
+        if adjusted + jitter >= params["raise_min"]:
+            return _size_preflop_raise(hand, seat, legal, profile, rng)
         return ("check", None)
 
     facing_raise = hand.current_bet > hand.bb
-    call_min = params["call_min"] + (FACING_RAISE_CALL_BUMP if facing_raise else 0.0)
     raise_min = params["raise_min"] + (FACING_RAISE_RAISE_BUMP if facing_raise else 0.0)
 
-    if adjusted >= raise_min:
-        return _size_preflop_raise(hand, seat, legal, profile)
-    if adjusted >= call_min:
+    # Mano fuerte: resubida de valor.
+    if adjusted + jitter >= raise_min:
+        return _size_preflop_raise(hand, seat, legal, profile, rng)
+
+    # Defensa por pot odds (ver docstring arriba).
+    pot_before = hand.pot_total()
+    required = pot_odds(to_call, pot_before)["required_equity_pct"] / 100.0
+    equity_est = _preflop_equity_estimate(adjusted) + jitter
+    if equity_est + params["call_margin"] >= required:
         return ("call", None)
+
+    # Farol de resubida ocasional (Tarea 3) con manos que de otro modo
+    # foldearían — más frecuente en perfiles agresivos (bluff_freq).
+    if "raise" in legal and rng.random() < params["bluff_freq"] * 0.5:
+        return _size_preflop_raise(hand, seat, legal, profile, rng)
+
     return ("fold", None)
 
 
@@ -243,7 +330,7 @@ def _preflop_decision(hand, seat, profile, preflop_range, rng) -> tuple:
             if mapped == "all_in":
                 return ("all_in", None)
             if mapped == "raise":
-                return _size_preflop_raise(hand, seat, legal, profile)
+                return _size_preflop_raise(hand, seat, legal, profile, rng)
 
     return _preflop_decision_no_range(hand, seat, profile, rng)
 
