@@ -119,6 +119,7 @@ export default function HandTable({
             <div className="text-[10px] uppercase tracking-widest text-[#475569] mb-2">Coach</div>
             <CoachPanel
               active={helpOpen && view.is_hero_turn && !view.finished}
+              handId={view.hand_id}
               coachAdviceLog={coachAdviceLog}
               handHistory={handHistory}
             />

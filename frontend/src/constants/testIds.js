@@ -73,6 +73,8 @@ export const PLAY = {
   coachNextBtn: "play-coach-next-btn",
   coachCounter: "play-coach-counter",
   sessionSummary: "play-session-summary",
+  coachAiBtn: "play-coach-ai-btn",
+  coachAiSection: "play-coach-ai-section",
 };
 
 export const TOURNAMENT = {

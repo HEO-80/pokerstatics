@@ -16,6 +16,13 @@ Endpoints:
   GET  /api/table/{hand_id}/coach       -> análisis de la decisión ACTUAL del
                                            hero (pot odds / breakeven / equity
                                            estimada) — ver poker_coach.py
+  POST /api/table/{hand_id}/coach-ai    -> coach v2: razonamiento estratégico
+                                           con IA (Gemini) encima de esos
+                                           mismos números — ver
+                                           poker_coach_ai.py. Bajo demanda
+                                           (el frontend solo lo llama si el
+                                           usuario pulsa el botón), NUNCA
+                                           automático como /coach.
 
 Persistencia: en memoria (HandStore, dict a nivel de módulo keyed por hand_id).
 Es una app local de un jugador: no hace falta Mongo. HandStore está aislado en
@@ -56,6 +63,7 @@ from pydantic import BaseModel, ConfigDict
 
 import poker_bot
 from poker_coach import build_coach_response
+from poker_coach_ai import CoachAiConfigError, CoachAiError, ask_ai_coach
 from poker_engine import card_str
 from poker_table import Hand, HandError, PlayerState
 
@@ -116,6 +124,16 @@ class ActionIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     action: str
     amount: Optional[float] = None
+
+
+class CoachAiIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    # Perfil de comportamiento del rival EN ESTA SESIÓN (VPIP/PFR/estilo), ej.
+    # "Agresivo (subió 38% preflop en 12 manos)" — ese cálculo vive en el
+    # frontend (lib/villainStats.js, sobre handHistory, que el backend no
+    # conserva entre manos), así que el frontend lo manda si lo tiene.
+    # Opcional: sin él, la IA razona igual, solo que sin ese dato extra.
+    villain_style: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +320,37 @@ async def coach(hand_id: str):
         raise HTTPException(status_code=400, detail="No es el turno del hero.")
 
     return {"hand_id": hand_id, **build_coach_response(hand, hero_seat)}
+
+
+@table_router.post("/table/{hand_id}/coach-ai")
+async def coach_ai(hand_id: str, body: CoachAiIn = CoachAiIn()):
+    """Coach v2: razonamiento estratégico con IA (Gemini) sobre la decisión
+    ACTUAL del hero — ver poker_coach_ai.py. Mismo guard que /coach (solo
+    tiene sentido en el turno del hero, con la mano sin terminar); a
+    diferencia de /coach, este SOLO se llama cuando el frontend lo pide
+    explícitamente (botón "Pregúntale al coach"), nunca automáticamente en
+    cada turno — es una llamada de pago (Gemini) bajo demanda."""
+    try:
+        entry = _STORE.get(hand_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Mano no encontrada.")
+
+    hand: Hand = entry["hand"]
+    hero_seat = entry["hero_seat"]
+
+    if hand.is_complete:
+        raise HTTPException(status_code=400, detail="La mano ya ha terminado.")
+    if hand.current_seat != hero_seat:
+        raise HTTPException(status_code=400, detail="No es el turno del hero.")
+
+    try:
+        text = ask_ai_coach(hand, hero_seat, villain_style=body.villain_style)
+    except CoachAiConfigError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except CoachAiError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return {"hand_id": hand_id, "text": text}
 
 
 @table_router.post("/table/{hand_id}/action")

@@ -63,3 +63,12 @@ export async function fetchTableCoach(handId) {
   const { data } = await client.get(`/table/${handId}/coach`);
   return data;
 }
+
+// Coach v2 (IA, bajo demanda — solo se llama cuando el usuario pulsa el
+// botón "Pregúntale al coach", nunca automáticamente). `villainStyle` es el
+// texto de estilo del rival ya calculado en el frontend (lib/villainStats.js,
+// ver CoachPanel.jsx) — opcional, el backend razona igual sin él.
+export async function fetchTableCoachAi(handId, villainStyle) {
+  const { data } = await client.post(`/table/${handId}/coach-ai`, { villain_style: villainStyle ?? null });
+  return data;
+}
