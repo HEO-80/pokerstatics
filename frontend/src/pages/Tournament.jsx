@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Swords, RotateCw, LogOut, ListOrdered, Skull, TrendingUp, Trophy, Users } from "lucide-react";
 import HandTable from "@/components/HandTable";
@@ -13,6 +13,7 @@ import { TOURNAMENT } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
 import { pickRandomNames } from "@/lib/playerNames";
 import { evolveFieldStacks, rescaleStacksToSum, eliminateLowStacks, buildRanking } from "@/lib/mtt";
+import { buildPayoutStructure, prizeForPlace, isInMoney, isBubblePlace } from "@/lib/payouts";
 
 // Modo Torneo — MTT de verdad (100/500/1000 inscritos), hasta la mesa final.
 //
@@ -136,6 +137,17 @@ export default function Tournament() {
     actionAnimated,
   } = useTableSession("tournament");
   const pointsProgress = usePointsProgress(coachAdviceLog);
+  // Premios (lib/payouts.js): puramente función de config.totalEntrants —
+  // se recalcula solo si eso cambia (una vez por partida, en la práctica).
+  const payoutStructure = useMemo(
+    () => (config ? buildPayoutStructure(config.totalEntrants) : null),
+    [config],
+  );
+  // Distinto del "Burbuja" agregado (roundPhase, modelo estadístico del
+  // campo): esto es la burbuja DE PREMIOS exacta (puesto = paidPlaces+1,
+  // ver isBubblePlace) — se re-arma cada vez que el hero sale de ahí, para
+  // poder avisar de nuevo si vuelve a caer justo en esa posición.
+  const moneyBubbleAnnouncedRef = useRef(false);
 
   const getPlayerName = useCallback((seat, players) => {
     const chair = aliveSlotsRef.current[seat] ?? seat;
@@ -208,6 +220,7 @@ export default function Tournament() {
     remainingRef.current = totalEntrants;
     bubbleAnnouncedRef.current = false;
     finalTableAnnouncedRef.current = false;
+    moneyBubbleAnnouncedRef.current = false;
     setRemaining(totalEntrants);
     setAvgStack(startingStack);
     setFinalPosition(null);
@@ -333,6 +346,22 @@ export default function Tournament() {
       setRanking(newRanking);
       setEstimatedPosition(newRanking.heroRank);
 
+      // Burbuja DE PREMIOS: el peor sitio posible para caer (justo el
+      // puesto anterior a cobrar). Se re-arma si el hero sale de ahí, para
+      // poder avisar de nuevo si vuelve a caer justo en esa posición.
+      if (payoutStructure) {
+        if (isBubblePlace(payoutStructure, newRanking.heroRank)) {
+          if (!moneyBubbleAnnouncedRef.current) {
+            moneyBubbleAnnouncedRef.current = true;
+            toast.error(
+              `¡Estás en la burbuja de premios! Puesto ${newRanking.heroRank}, premios desde el ${payoutStructure.paidPlaces}.`,
+            );
+          }
+        } else {
+          moneyBubbleAnnouncedRef.current = false;
+        }
+      }
+
       if (orderedChairs.length === 1 && fieldPlayersRef.current.length === 0) {
         setPhase("won");
         return;
@@ -359,6 +388,12 @@ export default function Tournament() {
 
   const roles = view ? seatRoles(view.players.length, buttonSeat) : null;
   const heroStack = view?.players.find((p) => p.seat === HERO_SEAT)?.stack ?? 0;
+
+  // Premio del puesto final: eliminado -> finalPosition; ganador -> siempre
+  // puesto 1 (se quedó con todas las fichas del torneo).
+  const finalPrize = prizeForPlace(payoutStructure, finalPosition);
+  const finalPositionInMoney = isInMoney(payoutStructure, finalPosition);
+  const winnerPrize = prizeForPlace(payoutStructure, 1);
 
   const lobbyAllowedLevels = allowedStartLevels(Number(lobby.startingStack) || 0);
 
@@ -417,6 +452,7 @@ export default function Tournament() {
           ranking={ranking}
           remaining={remaining}
           totalEntrants={config?.totalEntrants}
+          payoutStructure={payoutStructure}
           onClose={() => setShowRanking(false)}
         />
       )}
@@ -440,6 +476,16 @@ export default function Tournament() {
           <div data-testid={TOURNAMENT.hudPosition} className="text-[#94A3B8]">
             Posición <span className="text-white font-bold">#{estimatedPosition ?? "—"}</span>
           </div>
+          {payoutStructure && (
+            <>
+              <div data-testid={TOURNAMENT.hudPrizePool} className="text-[#94A3B8]">
+                Bote: <span className="text-[#F59E0B] font-bold">{payoutStructure.totalPrizePool.toLocaleString("es-ES")}</span>
+              </div>
+              <div data-testid={TOURNAMENT.hudPaidPlaces} className="text-[#94A3B8]">
+                Premios: top <span className="text-white font-bold">{payoutStructure.paidPlaces}</span>
+              </div>
+            </>
+          )}
           <div
             className="flex items-center gap-1.5"
             style={{ color: ROUND_PHASE_COLOR[roundPhase] }}
@@ -463,6 +509,15 @@ export default function Tournament() {
               Mesa final
             </div>
           )}
+        </div>
+      )}
+
+      {phase === "playing" && view && payoutStructure && isBubblePlace(payoutStructure, estimatedPosition) && (
+        <div
+          data-testid={TOURNAMENT.moneyBubbleBanner}
+          className="mb-2 px-4 py-2 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/40 text-[#EF4444] text-sm font-display font-bold uppercase tracking-wide text-center"
+        >
+          ¡Estás en la burbuja de premios! Puesto {estimatedPosition}, premios desde el {payoutStructure.paidPlaces}.
         </div>
       )}
 
@@ -590,6 +645,17 @@ export default function Tournament() {
           <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
             Puesto {finalPosition} de {config?.totalEntrants}
           </div>
+          {payoutStructure && (
+            <div data-testid={TOURNAMENT.finalPrize} className="mb-2 font-display font-bold uppercase tracking-wide">
+              {finalPositionInMoney ? (
+                <span className="text-[#F59E0B]">Premio: {finalPrize.toLocaleString("es-ES")}</span>
+              ) : (
+                <span className="text-[#475569]">
+                  Sin premio (puesto {finalPosition}, premios hasta el {payoutStructure.paidPlaces})
+                </span>
+              )}
+            </div>
+          )}
           <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
           <div className="mb-6 text-left">
             <SessionSummary
@@ -618,6 +684,11 @@ export default function Tournament() {
           <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
             ¡Has ganado el torneo!
           </div>
+          {payoutStructure && (
+            <div data-testid={TOURNAMENT.finalPrize} className="mb-2 font-display font-bold uppercase tracking-wide text-[#F59E0B]">
+              Premio: {winnerPrize.toLocaleString("es-ES")}
+            </div>
+          )}
           <div className="text-[#94A3B8] mb-6">
             Te impusiste a los {config?.totalEntrants} inscritos hasta quedarte con todas las fichas.
           </div>

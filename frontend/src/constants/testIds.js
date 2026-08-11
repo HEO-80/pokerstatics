@@ -103,6 +103,15 @@ export const TOURNAMENT = {
   rankingToggleBtn: "tournament-ranking-toggle-btn",
   rankingPanel: "tournament-ranking-panel",
   rankingHeroRow: "tournament-ranking-hero-row",
+  // Premios (lib/payouts.js)
+  hudPrizePool: "tournament-hud-prize-pool",
+  hudPaidPlaces: "tournament-hud-paid-places",
+  moneyBubbleBanner: "tournament-money-bubble-banner",
+  rankingPrizePool: "tournament-ranking-prize-pool",
+  rankingPaidPlaces: "tournament-ranking-paid-places",
+  rankingMoneyLine: "tournament-ranking-money-line",
+  rankingBubbleRow: "tournament-ranking-bubble-row",
+  finalPrize: "tournament-final-prize",
 };
 
 export const SITANDGO = {

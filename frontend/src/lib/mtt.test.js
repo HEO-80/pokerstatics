@@ -1,4 +1,10 @@
-import { evolveFieldStacks, rescaleStacksToSum, eliminateLowStacks, buildRanking } from "./mtt";
+import {
+  evolveFieldStacks,
+  rescaleStacksToSum,
+  eliminateLowStacks,
+  buildRanking,
+  roundStacksPreservingSum,
+} from "./mtt";
 
 // RNG determinista para tests reproducibles (en vez de Math.random).
 function seededRng(seed) {
@@ -9,7 +15,52 @@ function seededRng(seed) {
   };
 }
 
+describe("roundStacksPreservingSum", () => {
+  it("devuelve solo enteros", () => {
+    const rounded = roundStacksPreservingSum([321.8647306174687, 99.2, 1000.5, 0.4]);
+    rounded.forEach((s) => expect(Number.isInteger(s)).toBe(true));
+  });
+
+  it("la suma redondeada coincide EXACTAMENTE con la suma original redondeada", () => {
+    const original = [50.3, 20.9, 999.4, 3.1, 4.999];
+    const targetSum = Math.round(original.reduce((a, b) => a + b, 0));
+    const rounded = roundStacksPreservingSum(original);
+    expect(rounded.reduce((a, b) => a + b, 0)).toBe(targetSum);
+  });
+
+  it("ajusta el resto de redondeo sobre el jugador con MÁS fichas, no lo pierde ni lo inventa", () => {
+    // 3 stacks que redondean "hacia abajo" con .33 cada uno -> falta cuadrar +1
+    // sobre el más grande.
+    const rounded = roundStacksPreservingSum([100.33, 50.33, 10.34]);
+    // suma original ~161, debe cuadrar a 161 exactos
+    expect(rounded.reduce((a, b) => a + b, 0)).toBe(161);
+    // el ajuste cae en el índice del stack más grande (100 -> 101, no en 50 ni 10)
+    expect(rounded[0]).toBeGreaterThanOrEqual(100);
+  });
+
+  it("nunca deja un stack por debajo de 1", () => {
+    const rounded = roundStacksPreservingSum([0.2, 0.4, 500]);
+    rounded.forEach((s) => expect(s).toBeGreaterThanOrEqual(1));
+  });
+
+  it("array vacío devuelve array vacío", () => {
+    expect(roundStacksPreservingSum([])).toEqual([]);
+  });
+
+  it("ya-enteros se quedan igual", () => {
+    expect(roundStacksPreservingSum([100, 200, 300])).toEqual([100, 200, 300]);
+  });
+});
+
 describe("evolveFieldStacks", () => {
+  it("SIEMPRE devuelve enteros (bug: antes salían decimales tipo 321.8647306174687)", () => {
+    const stacks = [1, 5, 100, 1000, 321, 733];
+    for (let i = 0; i < 100; i++) {
+      const evolved = evolveFieldStacks(stacks, Math.random);
+      evolved.forEach((s) => expect(Number.isInteger(s)).toBe(true));
+    }
+  });
+
   it("nunca deja un stack por debajo de 1", () => {
     const stacks = [1, 5, 100, 1000];
     for (let i = 0; i < 50; i++) {
@@ -36,11 +87,16 @@ describe("evolveFieldStacks", () => {
 });
 
 describe("rescaleStacksToSum", () => {
-  it("la suma final coincide exactamente con el target (conservación de fichas)", () => {
+  it("SIEMPRE devuelve enteros (bug: antes salían decimales)", () => {
+    const rescaled = rescaleStacksToSum([37, 891, 12, 456, 3], 9973);
+    rescaled.forEach((s) => expect(Number.isInteger(s)).toBe(true));
+  });
+
+  it("la suma final coincide EXACTAMENTE con el target (conservación de fichas, ya enteros)", () => {
     const stacks = [50, 300, 20, 900, 5];
     const rescaled = rescaleStacksToSum(stacks, 10000);
     const sum = rescaled.reduce((a, b) => a + b, 0);
-    expect(sum).toBeCloseTo(10000, 6);
+    expect(sum).toBe(10000);
   });
 
   it("conserva el orden relativo (reescalado proporcional)", () => {
@@ -148,5 +204,57 @@ describe("buildRanking", () => {
     const ranking = buildRanking(heroTable, [], 10);
     expect(ranking.total).toBe(3);
     expect(ranking.heroRank).toBe(1);
+  });
+
+  it("con stacks del campo ya redondeados (evolve+rescale), el ranking entero sale en enteros", () => {
+    const startingStack = 100;
+    const fieldStacks = rescaleStacksToSum(
+      evolveFieldStacks(Array.from({ length: 50 }, () => startingStack)),
+      50 * startingStack,
+    );
+    const field = fieldStacks.map((stack, i) => ({ name: `F${i}`, stack }));
+    const ranking = buildRanking(heroTable, field, 20);
+    ranking.top.forEach((p) => expect(Number.isInteger(p.stack)).toBe(true));
+    expect(Number.isInteger(ranking.heroEntry.stack)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUG reportado: "Klaus 321.8647306174687" — los stacks del campo simulado
+// salían con muchos decimales tras varias rondas de evolve/eliminate/rescale
+// encadenadas. Simula una partida completa (muchas rondas seguidas, como
+// nextHand() en Tournament.jsx) y verifica que en NINGÚN momento aparece un
+// decimal y que la suma total nunca se descuadra.
+// ---------------------------------------------------------------------------
+describe("integración: rondas encadenadas de campo (evolve -> eliminate -> rescale)", () => {
+  it("todos los stacks son siempre enteros y la suma total del campo cuadra en cada ronda", () => {
+    const totalEntrants = 500;
+    const startingStack = 100;
+    let field = Array.from({ length: totalEntrants - 9 }, (_, i) => ({
+      name: `F${i}`,
+      stack: startingStack,
+    }));
+    let heroTableChips = 9 * startingStack; // fichas reales fuera del campo (fijas en este test)
+
+    for (let round = 0; round < 30 && field.length > 0; round++) {
+      const targetSum = totalEntrants * startingStack - heroTableChips;
+
+      const evolvedStacks = evolveFieldStacks(field.map((p) => p.stack));
+      field = field.map((p, i) => ({ ...p, stack: evolvedStacks[i] }));
+      field.forEach((p) => expect(Number.isInteger(p.stack)).toBe(true));
+
+      const eliminatedThisRound = Math.min(field.length, 3 + (round % 5));
+      const { survivors } = eliminateLowStacks(field, eliminatedThisRound);
+      const rescaledStacks = rescaleStacksToSum(survivors.map((p) => p.stack), targetSum);
+      field = survivors.map((p, i) => ({ ...p, stack: rescaledStacks[i] }));
+
+      field.forEach((p) => expect(Number.isInteger(p.stack)).toBe(true));
+      if (field.length > 0) {
+        // La suma cuadra exactamente con lo que de verdad queda en juego
+        // fuera de la mesa del hero (salvo el caso límite, no alcanzado
+        // aquí, en que el suelo de 1 ficha/jugador obliga a superar el target).
+        expect(field.reduce((a, b) => a + b.stack, 0)).toBe(targetSum);
+      }
+    }
   });
 });

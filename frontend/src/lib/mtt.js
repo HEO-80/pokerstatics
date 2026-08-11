@@ -38,25 +38,56 @@
 // que ahora en la mesa real).
 
 /**
+ * Redondea `stacks` a ENTEROS — las fichas son siempre enteras, nunca
+ * "321.8647306174687" — sin descuadrar la suma total: redondear cada stack
+ * por separado (Math.round) puede dejar la suma 1-2 fichas por encima o por
+ * debajo del total real (cada redondeo individual se desvía como mucho
+ * ±0.5), así que esa diferencia sobrante/faltante se ajusta ENTERA sobre el
+ * jugador con MÁS fichas (el que menos lo va a notar en proporción) en vez
+ * de perderla o inventarla de la nada. Nunca deja un stack por debajo de 1
+ * ficha. Usada por evolveFieldStacks y rescaleStacksToSum — cualquier
+ * operación que mueva stacks debe pasar por aquí antes de devolverlos.
+ */
+export function roundStacksPreservingSum(stacks) {
+  if (stacks.length === 0) return [];
+  const targetSum = Math.round(stacks.reduce((a, b) => a + b, 0));
+  const rounded = stacks.map((s) => Math.max(1, Math.round(s)));
+  const diff = targetSum - rounded.reduce((a, b) => a + b, 0);
+  if (diff !== 0) {
+    let maxIdx = 0;
+    for (let i = 1; i < rounded.length; i++) {
+      if (rounded[i] > rounded[maxIdx]) maxIdx = i;
+    }
+    rounded[maxIdx] = Math.max(1, rounded[maxIdx] + diff);
+  }
+  return rounded;
+}
+
+/**
  * Ruido multiplicativo por ronda, en [0.85, 1.15] — sube o baja hasta un
  * 15%. `rng` inyectable (por defecto Math.random) para tests deterministas.
+ * Redondeado a enteros (ver roundStacksPreservingSum) antes de devolver.
  */
 export function evolveFieldStacks(stacks, rng = Math.random) {
-  return stacks.map((s) => Math.max(1, s * (0.85 + rng() * 0.3)));
+  const evolved = stacks.map((s) => Math.max(1, s * (0.85 + rng() * 0.3)));
+  return roundStacksPreservingSum(evolved);
 }
 
 /**
  * Reescala `stacks` (proporcionalmente) para que su suma sea exactamente
- * `targetSum`, sin dejar ningún stack por debajo de 1 ficha. Con suma
- * actual 0 (no debería pasar con stacks ya floored a >=1, salvo array
- * vacío) reparte el target a partes iguales.
+ * `targetSum`, sin dejar ningún stack por debajo de 1 ficha, y REDONDEADO A
+ * ENTEROS (ver roundStacksPreservingSum) — con suma actual 0 (no debería
+ * pasar con stacks ya floored a >=1, salvo array vacío) reparte el target a
+ * partes iguales.
  */
 export function rescaleStacksToSum(stacks, targetSum) {
   if (stacks.length === 0) return [];
   const currentSum = stacks.reduce((a, b) => a + b, 0);
-  if (currentSum <= 0) return stacks.map(() => Math.max(1, targetSum / stacks.length));
-  const factor = targetSum / currentSum;
-  return stacks.map((s) => Math.max(1, s * factor));
+  const rescaled =
+    currentSum <= 0
+      ? stacks.map(() => Math.max(1, targetSum / stacks.length))
+      : stacks.map((s) => Math.max(1, s * (targetSum / currentSum)));
+  return roundStacksPreservingSum(rescaled);
 }
 
 /**
