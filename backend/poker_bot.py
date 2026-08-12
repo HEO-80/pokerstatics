@@ -17,6 +17,8 @@ Sin dependencias externas: solo librería estándar + esos dos módulos.
 
 from __future__ import annotations
 
+import json
+import os
 import random
 
 from poker_engine import RANKS, RANK_TO_INT, card_str, equity_vs_range, pot_odds
@@ -202,6 +204,125 @@ def chen_score(code: str) -> float:
 def chen_strength(code: str) -> float:
     """Fuerza normalizada 0..1 (AA=1.0, basura tipo 72o≈0)."""
     return max(0.0, min(1.0, chen_score(code) / 20.0))
+
+
+# ---------------------------------------------------------------------------
+# Rangos de apertura reales (RFI) por posición — backend/data/opening_ranges.json
+# ---------------------------------------------------------------------------
+# Mapeo asiento -> etiqueta de posición (UTG/UTG1/MP/HJ/CO/BTN/SB, la BB
+# nunca abre). Se deriva SOLO de hand.button_seat y hand.seats (sin duplicar
+# el orden de acción privado de poker_table.Hand): partiendo del asiento del
+# botón en sentido horario, los 3 últimos en actuar preflop son siempre
+# BTN, SB, BB (en ese orden) para 3+ jugadores — igual que
+# Hand._preflop_first_actor_order(). Los `k` asientos restantes (early/mid)
+# se reparten sobre las 5 etiquetas EARLY_MID_LABELS (en orden de actuación)
+# espaciándolas lo más uniformemente posible:
+#   6-max (k=3): UTG, MP, CO               (salta UTG1 y HJ)
+#   9-max (k=6): UTG, UTG1, MP, MP, HJ, CO (MP se repite en dos asientos)
+#   8-max (k=5): UTG, UTG1, MP, HJ, CO      (encaja 1 a 1, sin huecos)
+# Con un único asiento early/mid (k=1, mesas de 4) se usa CO — en una mesa
+# tan corta ese asiento juega, en la práctica, un rango ancho tipo cutoff,
+# no un UTG real de mesa llena.
+# Heads-up (2 jugadores): el botón ES la SB (actúa primero preflop, como en
+# NLHE real) y usa el rango "SB"; el otro asiento es la BB (no abre).
+EARLY_MID_LABELS = ["UTG", "UTG1", "MP", "HJ", "CO"]
+
+
+def _seat_position_label(hand, seat: int) -> str | None:
+    """Etiqueta de posición (clave de opening_ranges.json) para `seat` en
+    esta mano, o None si ese asiento es la BB (no tiene rango de apertura)."""
+    seats = hand.seats
+    n = len(seats)
+    i = seats.index(hand.button_seat)
+    order = seats[i:] + seats[:i]  # [BTN, SB, BB, UTG, ..., CO] horario desde el botón
+
+    if n == 2:
+        return "SB" if seat == hand.button_seat else None
+
+    btn, sb, bb = order[0], order[1], order[2]
+    if seat == bb:
+        return None
+    if seat == btn:
+        return "BTN"
+    if seat == sb:
+        return "SB"
+
+    early_mid = order[3:]
+    k = len(early_mid)
+    j = early_mid.index(seat)
+    if k == 1:
+        idx = len(EARLY_MID_LABELS) - 1
+    else:
+        idx = round(j * (len(EARLY_MID_LABELS) - 1) / (k - 1))
+    return EARLY_MID_LABELS[idx]
+
+
+_OPENING_RANGES_PATH = os.path.join(os.path.dirname(__file__), "data", "opening_ranges.json")
+
+
+def _load_opening_ranges() -> dict:
+    try:
+        with open(_OPENING_RANGES_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+_RAW_OPENING_RANGES = _load_opening_ranges()
+
+# El PERFIL modula el rango GTO base (no hay "rango del nit" en los datos:
+# son puramente por posición) recortando o ensanchando por el BORDE, con las
+# manos ordenadas por fuerza de Chen — ni sustituye la tabla ni toca las
+# manos claramente dentro/fuera del rango, solo el margen.
+#   nit:     conserva solo el `factor` MÁS FUERTE del rango (fold el resto).
+#   lag:     añade un `factor` extra de manos, las siguientes más fuertes
+#            FUERA del rango (marginales que el rango GTO foldea).
+#   tag / station: el rango tal cual (station modula pagar-vs-subir en su
+#            lógica postflop existente, no la apertura).
+OPEN_RANGE_TIGHTEN_PROFILES = {"nit": 0.70}
+OPEN_RANGE_WIDEN_PROFILES = {"lag": 0.20}
+
+
+def _base_open_set(position: str) -> frozenset:
+    payload = _RAW_OPENING_RANGES.get(position)
+    if not payload:
+        return frozenset()
+    ranges = payload.get("ranges", {})
+    return frozenset(
+        code for code, entry in ranges.items()
+        if entry.get("actions", {}).get("raise", 0) > 0
+    )
+
+
+def _modulate_open_set(base: frozenset, profile: str) -> frozenset:
+    if not base:
+        return base
+    by_strength = sorted(_all_hand_codes(), key=chen_strength, reverse=True)
+    base_sorted = [c for c in by_strength if c in base]
+
+    tighten = OPEN_RANGE_TIGHTEN_PROFILES.get(profile)
+    if tighten is not None:
+        keep = max(1, round(len(base_sorted) * tighten))
+        return frozenset(base_sorted[:keep])
+
+    widen = OPEN_RANGE_WIDEN_PROFILES.get(profile)
+    if widen is not None:
+        extra_n = round(len(base_sorted) * widen)
+        outside = [c for c in by_strength if c not in base]
+        return frozenset(base_sorted) | frozenset(outside[:extra_n])
+
+    return frozenset(base_sorted)  # tag / station
+
+
+def _build_open_sets_by_profile() -> dict:
+    positions = list(_RAW_OPENING_RANGES.keys())
+    return {
+        profile: {pos: _modulate_open_set(_base_open_set(pos), profile) for pos in positions}
+        for profile in PROFILE_PARAMS
+    }
+
+
+OPEN_SETS_BY_PROFILE = _build_open_sets_by_profile()
 
 
 def _position_factor(hand) -> float:
@@ -419,6 +540,15 @@ def _preflop_decision_no_range(hand, seat, profile, rng) -> tuple:
     aplica igual al umbral de resubida que a la equity estimada — dos bots
     con la MISMA mano, perfil y situación no tienen por qué decidir siempre
     igual.
+
+    EXCEPCIÓN — apertura (RFI) con rango real: si el bot es el PRIMERO en
+    entrar (nadie ha subido, `hand.current_bet <= hand.bb`) y su asiento
+    mapea a una posición con rango cargado de opening_ranges.json
+    (OPEN_SETS_BY_PROFILE, ya modulado por perfil), la decisión de abrir NO
+    usa `raise_min`/Chen ni pot odds/limpar: abre si la mano está en el
+    rango de su posición+perfil, si no, se retira — sustituye por completo
+    a la heurística SOLO en ese punto concreto. Sin rango para esa posición
+    (o asiento = BB, que no abre), sigue la heurística de siempre.
     """
     params = PROFILE_PARAMS[profile]
     player = hand.players[seat]
@@ -434,6 +564,14 @@ def _preflop_decision_no_range(hand, seat, profile, rng) -> tuple:
         if adjusted + jitter >= params["raise_min"]:
             return _size_preflop_raise(hand, seat, legal, profile, rng)
         return ("check", None)
+
+    if hand.current_bet <= hand.bb:
+        position = _seat_position_label(hand, seat)
+        open_set = OPEN_SETS_BY_PROFILE.get(profile, {}).get(position) if position else None
+        if open_set is not None:
+            if code in open_set:
+                return _size_preflop_raise(hand, seat, legal, profile, rng)
+            return ("fold", None)
 
     facing_raise = hand.current_bet > hand.bb
     raise_min = params["raise_min"] + (FACING_RAISE_RAISE_BUMP if facing_raise else 0.0)
