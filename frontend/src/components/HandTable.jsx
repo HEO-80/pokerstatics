@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Trophy, HelpCircle, History, Flame, Mic, MicOff, Sparkles, Star, Volume2, VolumeX } from "lucide-react";
+import { Trophy, HelpCircle, History, Flame, Mic, MicOff, Sparkles, Star, Volume2, VolumeX, X } from "lucide-react";
 import PlayTable from "./PlayTable";
 import PlayActionBar from "./PlayActionBar";
 import ActivityLog from "./ActivityLog";
@@ -34,28 +34,32 @@ function saveHelpOpen(open) {
   }
 }
 
-const TABLE_ROW_HEIGHT = "440px";
-
-// Estilo de los toggles "Actividad"/"Coach IA" de la esquina superior
-// derecha (Tarea 2): mismo lenguaje visual (píldora con borde + fondo
-// tintado + texto de color) que ya tenía el botón "Pregúntale al coach",
-// solo que aquí cada panel tiene su propio color de identidad (Actividad =
-// azul, Coach IA = morado, el mismo morado de siempre) y un estado
-// encendido/apagado en vez de ser un botón de una sola acción.
-const RIGHT_TOGGLE_PALETTE = {
+// Estilo de los TRES toggles de la barra de control (Ayuda/Coach IA/
+// Actividad — Tarea "layout sin scroll" §5): mismo lenguaje visual (píldora
+// con borde + fondo tintado + texto de color), cada uno con su color de
+// identidad (Ayuda = blanco; Actividad = azul; Coach IA = morado) y un
+// estado encendido/apagado INDEPENDIENTE — los tres se abren/cierran por
+// separado (ver docstring del componente más abajo). Colores exactos del
+// spec: inactivo fondo #161b24 / borde #2b3441 con sombra sutil; activo,
+// relleno translúcido del color + glow (salvo Ayuda, que es sólido blanco).
+const TOGGLE_PALETTE = {
+  white: {
+    on: "bg-white text-black border-white",
+    off: "bg-[#161b24] border-[#2b3441] text-[#94A3B8] hover:text-white hover:border-white/30 shadow-sm",
+  },
   blue: {
-    on: "bg-[#3B82F6]/15 border-[#3B82F6]/50 text-[#3B82F6]",
-    off: "border-white/12 text-[#94A3B8] hover:text-white hover:border-white/30",
+    on: "bg-[#3B82F6]/15 border-[#3B82F6]/60 text-[#3B82F6] shadow-[0_0_12px_rgba(59,130,246,0.25)]",
+    off: "bg-[#161b24] border-[#2b3441] text-[#94A3B8] hover:text-white hover:border-white/30 shadow-sm",
   },
   purple: {
-    on: "bg-[#8B5CF6]/15 border-[#8B5CF6]/50 text-[#8B5CF6]",
-    off: "border-white/12 text-[#94A3B8] hover:text-white hover:border-white/30",
+    on: "bg-[#8B5CF6]/15 border-[#8B5CF6]/60 text-[#8B5CF6] shadow-[0_0_12px_rgba(139,92,246,0.3)]",
+    off: "bg-[#161b24] border-[#2b3441] text-[#94A3B8] hover:text-white hover:border-white/30 shadow-sm",
   },
 };
 
-function rightToggleClass(isActive, color) {
+function toggleClass(isActive, color) {
   return `px-2.5 py-1.5 rounded-lg border text-[11px] font-display font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 ${
-    isActive ? RIGHT_TOGGLE_PALETTE[color].on : RIGHT_TOGGLE_PALETTE[color].off
+    isActive ? TOGGLE_PALETTE[color].on : TOGGLE_PALETTE[color].off
   }`;
 }
 
@@ -84,16 +88,25 @@ function buildCoachSpokenText(entry) {
  * (ActivityLog.jsx) hace scroll interno y sigue "pegado" al final mientras el
  * usuario no suba a revisar manos anteriores.
  *
- * La mesa tiene ALTURA FIJA (TABLE_ROW_HEIGHT) independiente de lo que ocupe
- * la barra de acciones debajo — antes la mesa vivía en un flex-1 dentro de un
- * contenedor de altura total fija, así que cuando la barra de acciones crecía
- * (p.ej. el panel de raise con slider) la mesa se encogía para compensar.
- * Ahora la mesa nunca cambia de tamaño; el conjunto entero (HUD + mesa/log +
- * acciones) sigue cabiendo sin scroll en un viewport ~900px de alto.
+ * Cadena de alturas (Tarea "layout sin scroll" §2): este componente vive
+ * dentro de un contenedor `flex-1 min-h-0` del caller (SitAndGo.jsx) — su
+ * raíz es igualmente `flex-1 min-h-0` y CADA nivel hijo es `shrink-0` (fila
+ * de controles, fila de stats, zona inferior) o `flex-1 min-h-0` (la fila de
+ * la mesa) — nunca una altura fija en px. Antes la fila de la mesa tenía
+ * `style={{ height: "440px" }}`: eso es justo lo que impedía que la mesa
+ * absorbiera el espacio real disponible y lo que producía el desborde
+ * vertical de página — ver PASO 0 de la tarea.
  *
- * A la izquierda se reserva una columna de ancho fijo para un futuro panel de
- * coach/ayuda (de momento solo el botón "Ayuda" + un placeholder) — esto
- * desplaza la mesa hacia la derecha y ya deja el hueco listo en el layout.
+ * Layout de paneles: una barra de control con 3 toggles independientes
+ * (Ayuda/Coach IA/Actividad, ver más abajo) muestra/oculta cada panel por
+ * separado. Ayuda y Coach IA comparten el mismo hueco fijo a la IZQUIERDA
+ * (`leftSlotOpen`): si ambos están abiertos a la vez, Coach IA se pinta
+ * ENCIMA de Ayuda (mismo sitio y tamaño — capas absolutas dentro de un
+ * contenedor `relative`) y se cierra con su propio botón o la ✕. Actividad
+ * vive en su propio hueco a la DERECHA, como columna en flujo (NUNCA
+ * absolute — si se superpusiera taparía asientos de la mesa). Con los tres
+ * cerrados no se reserva ningún hueco y la mesa (flex-1) ocupa el ancho
+ * completo sin scroll horizontal.
  */
 export default function HandTable({
   view,
@@ -125,10 +138,12 @@ export default function HandTable({
   // re-renderiza sin que llegue un consejo nuevo) — guarda el id de la
   // última entrada de coachAdviceLog ya leída en voz.
   const lastSpokenAdviceIdRef = useRef(null);
-  // Panel de la columna DERECHA: "activity" | "ai" | null — nunca los dos a
-  // la vez (Tarea 2). null deja ese espacio libre para que la mesa
-  // (flex-1) lo aproveche entero.
-  const [rightPanel, setRightPanel] = useState("activity");
+  // Coach IA (aiOpen) y Actividad (activityOpen): booleanos INDEPENDIENTES —
+  // Coach IA se superpone sobre el hueco de Ayuda (ver `leftSlotOpen` más
+  // abajo) y Actividad tiene su propio hueco a la derecha, así que cada uno
+  // se abre/cierra sin afectar al otro.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(true);
 
   useEffect(() => {
     saveHelpOpen(helpOpen);
@@ -138,12 +153,12 @@ export default function HandTable({
 
   // Coach IA (v2): antes vivía dentro de CoachPanel (columna izquierda,
   // atado a lo que el usuario estuviera navegando ahí); ahora es un panel
-  // aparte a la derecha, así que la decisión "viva" sobre la que preguntar
-  // se calcula aquí directamente — el turno REAL del hero en curso, no lo
-  // que el panel izquierdo tenga pinneado. `coachAdviceLog` siempre trae la
-  // entrada de la decisión actual como su ÚLTIMO elemento (se añade en
-  // segundo plano al empezar cada turno real, ver useTableSession.js), así
-  // que basta con tomar esa última entrada cuando el turno sigue activo.
+  // aparte, así que la decisión "viva" sobre la que preguntar se calcula
+  // aquí directamente — el turno REAL del hero en curso, no lo que el panel
+  // izquierdo tenga pinneado. `coachAdviceLog` siempre trae la entrada de la
+  // decisión actual como su ÚLTIMO elemento (se añade en segundo plano al
+  // empezar cada turno real, ver useTableSession.js), así que basta con
+  // tomar esa última entrada cuando el turno sigue activo.
   const heroTurnActive = view.is_hero_turn && !view.finished;
   const liveAdviceEntry = heroTurnActive && coachAdviceLog.length > 0
     ? coachAdviceLog[coachAdviceLog.length - 1]
@@ -235,35 +250,92 @@ export default function HandTable({
     prevFinishedRef.current = view.finished;
   }, [view.finished, view.winners_by_pot, view.hero_seat]);
 
-  return (
-    <div className="flex gap-4">
-      <div className={`hidden lg:flex lg:flex-col shrink-0 gap-2 ${helpOpen ? "w-96" : "w-44"}`}>
-        <button
-          type="button"
-          data-testid={PLAY.helpToggleBtn}
-          aria-pressed={helpOpen}
-          onClick={() => setHelpOpen((v) => !v)}
-          className={`shrink-0 px-3 py-2.5 rounded-xl border text-xs font-display font-bold uppercase tracking-wider transition-colors inline-flex items-center justify-center gap-1.5 ${
-            helpOpen
-              ? "bg-white text-black border-white"
-              : "border-white/12 text-[#94A3B8] hover:text-white hover:border-white/30"
-          }`}
-        >
-          <HelpCircle className="w-3.5 h-3.5" /> Ayuda
-        </button>
-        {helpOpen && (
-          <div data-testid={PLAY.helpPanel} className="flex-1 glass-panel rounded-xl p-3 overflow-y-auto">
-            <div className="text-[10px] uppercase tracking-widest text-[#475569] mb-2">Coach</div>
-            <CoachPanel
-              active={helpOpen && heroTurnActive}
-              coachAdviceLog={coachAdviceLog}
-              handHistory={handHistory}
-            />
-          </div>
-        )}
-      </div>
+  // Hueco IZQUIERDO reservado (Ayuda y/o Coach IA): ver docstring del
+  // componente arriba. Si ninguno de los dos está abierto, no se reserva
+  // nada -> la mesa se agranda para ocupar ese espacio.
+  const leftSlotOpen = helpOpen || aiOpen;
 
-      <div className="flex-1 min-w-0 flex flex-col gap-2.5">
+  return (
+    <div className="flex-1 min-h-0 flex gap-4">
+      {leftSlotOpen && (
+        <div className="hidden lg:block relative shrink-0 w-[302px]">
+          {helpOpen && (
+            <div
+              data-testid={PLAY.helpPanel}
+              className="absolute inset-0 glass-panel rounded-xl p-3 flex flex-col overflow-hidden"
+            >
+              <div className="shrink-0 text-[10px] uppercase tracking-widest text-[#475569] mb-2">Ayuda</div>
+              <div className="flex-1 min-h-0">
+                <CoachPanel
+                  active={helpOpen && heroTurnActive}
+                  coachAdviceLog={coachAdviceLog}
+                  handHistory={handHistory}
+                />
+              </div>
+            </div>
+          )}
+          {aiOpen && (
+            <div className="absolute inset-0 z-10 rounded-xl overflow-hidden flex flex-col p-3 bg-[#170f26] border border-[#7c3aed]/50 shadow-[0_0_28px_rgba(124,58,237,0.18)]">
+              <div className="shrink-0 flex items-center justify-between mb-2">
+                <div className="text-[10px] uppercase tracking-widest text-[#c4b5fd] flex items-center gap-1.5">
+                  <Sparkles className="w-3 h-3" /> Coach IA
+                </div>
+                <button
+                  type="button"
+                  data-testid={PLAY.coachAiCloseBtn}
+                  aria-label="Cerrar Coach IA"
+                  onClick={() => setAiOpen(false)}
+                  className="p-1 rounded-md text-[#94A3B8] hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <AiCoachPanel
+                canAsk={!!liveAdviceEntry}
+                aiState={aiState}
+                onAsk={askAi}
+                speaking={aiSpeaking}
+                onStopSpeaking={stopAiSpeaking}
+                className="flex-1 min-h-0 flex flex-col"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-2.5">
+        {/* Barra de control (segunda barra, bajo la navegación principal):
+            los 3 toggles de panel, independientes entre sí. */}
+        <div className="shrink-0 hidden lg:flex items-center gap-2">
+          <button
+            type="button"
+            data-testid={PLAY.helpToggleBtn}
+            aria-pressed={helpOpen}
+            onClick={() => setHelpOpen((v) => !v)}
+            className={toggleClass(helpOpen, "white")}
+          >
+            <HelpCircle className="w-3.5 h-3.5" /> Ayuda
+          </button>
+          <button
+            type="button"
+            data-testid={PLAY.coachAiToggleBtn}
+            aria-pressed={aiOpen}
+            onClick={() => setAiOpen((v) => !v)}
+            className={toggleClass(aiOpen, "purple")}
+          >
+            <Sparkles className="w-3.5 h-3.5" /> Coach IA
+          </button>
+          <button
+            type="button"
+            data-testid={PLAY.activityToggleBtn}
+            aria-pressed={activityOpen}
+            onClick={() => setActivityOpen((v) => !v)}
+            className={toggleClass(activityOpen, "blue")}
+          >
+            <History className="w-3.5 h-3.5" /> Actividad
+          </button>
+        </div>
+
         <div className="shrink-0 flex items-center gap-2 text-xs md:text-sm text-[#94A3B8] font-mono-poker">
           <div className="flex-1 flex items-center">
             {pointsProgress && (
@@ -295,27 +367,6 @@ export default function HandTable({
             )}
           </div>
           <div className="flex-1 flex items-center justify-end gap-2">
-            {/* Toggles Actividad/Coach IA (Tarea 2): solo uno de los dos
-                paneles de la derecha visible a la vez — pulsar el que ya
-                está activo lo cierra y libera ese espacio para la mesa. */}
-            <button
-              type="button"
-              data-testid={PLAY.activityToggleBtn}
-              aria-pressed={rightPanel === "activity"}
-              onClick={() => setRightPanel((p) => (p === "activity" ? null : "activity"))}
-              className={`hidden lg:inline-flex ${rightToggleClass(rightPanel === "activity", "blue")}`}
-            >
-              <History className="w-3.5 h-3.5" /> Actividad
-            </button>
-            <button
-              type="button"
-              data-testid={PLAY.coachAiToggleBtn}
-              aria-pressed={rightPanel === "ai"}
-              onClick={() => setRightPanel((p) => (p === "ai" ? null : "ai"))}
-              className={`hidden lg:inline-flex ${rightToggleClass(rightPanel === "ai", "purple")}`}
-            >
-              <Sparkles className="w-3.5 h-3.5" /> Coach IA
-            </button>
             {voiceSupported && (
               <button
                 type="button"
@@ -343,7 +394,7 @@ export default function HandTable({
           </div>
         </div>
 
-        <div className="shrink-0 flex gap-4" style={{ height: TABLE_ROW_HEIGHT }}>
+        <div className="flex-1 min-h-0 flex gap-4">
           <div className="relative flex-1 min-h-0">
             <PlayTable
               players={view.players}
@@ -363,21 +414,11 @@ export default function HandTable({
             />
           </div>
 
-          {rightPanel === "activity" && (
+          {activityOpen && (
             <ActivityLog
               handHistory={handHistory}
               testId={PLAY.botLog}
-              className="hidden lg:flex lg:flex-col w-56 shrink-0 glass-panel rounded-2xl p-3 overflow-y-auto"
-            />
-          )}
-          {rightPanel === "ai" && (
-            <AiCoachPanel
-              canAsk={!!liveAdviceEntry}
-              aiState={aiState}
-              onAsk={askAi}
-              speaking={aiSpeaking}
-              onStopSpeaking={stopAiSpeaking}
-              className="hidden lg:flex lg:flex-col w-56 shrink-0 glass-panel rounded-2xl p-3 overflow-y-auto"
+              className="hidden lg:flex lg:flex-col w-[290px] shrink-0 glass-panel rounded-2xl p-3 overflow-y-auto"
             />
           )}
         </div>

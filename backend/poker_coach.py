@@ -47,7 +47,7 @@ encima de esa función.
 from __future__ import annotations
 
 import poker_bot
-from poker_engine import breakeven_bluff, card_str, equity_vs_range, pot_odds
+from poker_engine import RANK_TO_INT, breakeven_bluff, card_str, equity_vs_range, pot_odds
 from poker_table import Hand, PlayerStatus
 
 # Percentiles (sobre las 169 hand-codes, ordenadas por chen_strength) que
@@ -135,6 +135,170 @@ def _position_word(hand: Hand, hero_seat: int) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Factor de REALIZACIÓN (R) — pagar una subida NO es un all-in: quedan
+# calles por jugar, a veces fuera de posición, con rivales que pueden
+# resubir detrás. Antes de este ajuste, derive_recommendation() comparaba
+# la equity CRUDA (a showdown, tipo all-in) directamente contra las pot
+# odds, y eso recomendaba call con manos tipo KQo/7To/J4o que "cumplen las
+# odds" en el papel pero pierden fichas en la práctica: no se realiza esa
+# equity fuera de posición, o llega un 3-bet detrás cuando ya has pagado.
+#
+# R vive en [R_FLOOR, 1.0] y se APLICA MULTIPLICANDO la equity cruda:
+#   equity_realizada = equity_cruda * R
+# en vez de sustituir ni tocar el motor de equity ni la estimación del
+# rango del rival (eso no cambia) — solo el número que se compara contra
+# pot odds en derive_recommendation.
+#
+# R = R_position * R_behind * R_multiway * R_playability
+#
+#   R_position  (posición respecto al rival relevante, pick_villain_seat):
+#     1.0 en posición (o rival ya all-in: no puede resubirte, la posición
+#     deja de importar para esta decisión) — OUT_OF_POSITION_FACTOR si no.
+#     "En posición" se define de forma POSTFLOP siempre (aunque el to_call
+#     venga de una subida preflop): quien actúa más tarde el RESTO de la
+#     mano (más cerca del botón) es quien realmente realiza su equity —
+#     reconstruido con hand.seats/hand.button_seat (públicos), NO con
+#     hand._postflop_first_actor_order/_street_order (privados) — mismo
+#     patrón que ya usa poker_bot._seat_position_label.
+#
+#   R_behind (rivales que AÚN deben decidir detrás del hero esta ronda,
+#     riesgo de resubida): hand.to_act[0] es siempre hero_seat cuando se
+#     llama a esto (build_coach_response exige que sea su turno), así que
+#     hand.to_act[1:] son exactamente esos rivales — mismo campo público
+#     que ya usa poker_bot._position_factor (`len(hand.to_act) - 1`).
+#     Penaliza REBEHIND_PENALTY_PER_RIVAL por cada uno, suelo REBEHIND_FLOOR.
+#
+#   R_multiway (bote YA multiway, más rivales ya dentro diluyen y complican
+#     la equity): REUTILIZA tal cual poker_bot.MULTIWAY_TIGHTEN_PER_RIVAL
+#     (0.06) y la misma fórmula de "rivales extra" que la calibración de
+#     defensa de ciegas ya usa (`extra_rivales = max(0, nº rivales activos
+#     - 1)`, el primer rival no penaliza) — no se inventa otra constante.
+#
+#   R_playability (jugabilidad de la mano del hero): 1.0 con pareja o mano
+#     suited; si es offsuit, según el gap entre rangos (mismo cálculo de
+#     gap que ya usa poker_bot.chen_score, aquí como multiplicador de
+#     realización en vez de sumando de puntuación): conectada (gap<=0,
+#     tipo KQo/JTo) 0.95, gap 1-2 (tipo 7To) 0.90, gap>=3 (tipo J4o) 0.85.
+#
+# SOLAPAMIENTO INTENCIONAL entre R_behind y R_multiway: un rival YA activo
+# en el bote que ADEMÁS todavía tiene que actuar detrás del hero penaliza
+# en los DOS factores a la vez (multiway Y riesgo de resubida). Esto NO es
+# un bug ni un doble-conteo por descuido — es a propósito: ese es
+# precisamente el spot más peligroso ("pago, y todavía puede pasar
+# cualquier cosa detrás con más de un rival vivo"), y queremos que la doble
+# presión se note en R más que cualquiera de los dos factores por separado.
+#
+# R_FLOOR evita que la combinación de los cuatro factores colapse a un
+# descuento absurdo (p.ej. multiway + OOP + varios detrás + mano offsuit
+# fea a la vez) — por debajo de ese suelo, más penalización ya no aporta
+# información nueva, sería indistinguible de "cualquier mano mala".
+OUT_OF_POSITION_FACTOR = 0.85
+REBEHIND_PENALTY_PER_RIVAL = 0.07
+REBEHIND_FLOOR = 0.50
+MULTIWAY_R_FLOOR = 0.50
+PLAYABILITY_SUITED_OR_PAIR = 1.00
+PLAYABILITY_OFFSUIT_CONNECTED = 0.95   # gap <= 0 (ej. KQo, JTo)
+PLAYABILITY_OFFSUIT_GAP_SMALL = 0.90   # gap 1-2 (ej. 7To)
+PLAYABILITY_OFFSUIT_GAP_BIG = 0.85     # gap >= 3 (ej. J4o)
+R_FLOOR = 0.35
+
+
+def _postflop_order(hand: Hand) -> list[int]:
+    """Orden de acción postflop (empieza justo después del botón; el botón
+    cierra la ronda) reconstruido SOLO con campos públicos de Hand
+    (seats/button_seat) — ver nota de R_position arriba."""
+    seats = hand.seats
+    i = seats.index(hand.button_seat)
+    rotated = seats[i:] + seats[:i]
+    return rotated[1:] + rotated[:1]
+
+
+def _hero_in_position(hand: Hand, hero_seat: int, villain_seat: int | None) -> bool:
+    if villain_seat is None or hand.players[villain_seat].status == PlayerStatus.ALL_IN:
+        return True
+    order = _postflop_order(hand)
+    return order.index(hero_seat) > order.index(villain_seat)
+
+
+def _playability_factor(hero_hole_cards: list[int]) -> float:
+    code = poker_bot.hole_cards_to_code(hero_hole_cards)
+    if len(code) == 2 or code[2] == "s":  # pareja o suited
+        return PLAYABILITY_SUITED_OR_PAIR
+    gap = RANK_TO_INT[code[0]] - RANK_TO_INT[code[1]] - 1
+    if gap <= 0:
+        return PLAYABILITY_OFFSUIT_CONNECTED
+    if gap <= 2:
+        return PLAYABILITY_OFFSUIT_GAP_SMALL
+    return PLAYABILITY_OFFSUIT_GAP_BIG
+
+
+def equity_realization_factor(
+    hand: Hand, hero_seat: int, villain_seat: int | None, active_villain_seats: list[int],
+) -> dict:
+    """R en [R_FLOOR, 1.0] + desglose de cada factor (para que la
+    explicación de la recomendación pueda decir POR QUÉ, no solo el
+    número final) — ver docstring de arriba para la fórmula completa."""
+    in_position = _hero_in_position(hand, hero_seat, villain_seat)
+    r_position = 1.0 if in_position else OUT_OF_POSITION_FACTOR
+
+    rivals_behind = max(0, len(hand.to_act) - 1)
+    r_behind = max(REBEHIND_FLOOR, 1.0 - rivals_behind * REBEHIND_PENALTY_PER_RIVAL)
+
+    extra_rivals_multiway = max(0, len(active_villain_seats) - 1)
+    r_multiway = max(
+        MULTIWAY_R_FLOOR, 1.0 - extra_rivals_multiway * poker_bot.MULTIWAY_TIGHTEN_PER_RIVAL
+    )
+
+    r_playability = _playability_factor(hand.players[hero_seat].hole_cards)
+
+    r = max(R_FLOOR, r_position * r_behind * r_multiway * r_playability)
+    return {
+        "r": round(r, 4),
+        "in_position": in_position,
+        "rivals_behind": rivals_behind,
+        "extra_rivals_multiway": extra_rivals_multiway,
+        "r_position": r_position,
+        "r_behind": r_behind,
+        "r_multiway": r_multiway,
+        "r_playability": r_playability,
+    }
+
+
+def _realization_reasons_text(realization: dict) -> str:
+    """Frase en texto de QUÉ bajó R por debajo de 1 — para que la
+    explicación nombre el porqué en vez de soltar el número pelado."""
+    reasons = []
+    if not realization["in_position"]:
+        reasons.append("estás fuera de posición")
+    if realization["rivals_behind"] > 0:
+        n = realization["rivals_behind"]
+        reasons.append(f"{n} rival{'es' if n != 1 else ''} por actuar detrás (riesgo de resubida)")
+    if realization["extra_rivals_multiway"] > 0:
+        reasons.append("el bote es multiway")
+    if realization["r_playability"] < 1.0:
+        reasons.append("tu mano (offsuit, poco conectada) es difícil de jugar bien")
+    if not reasons:
+        return ""
+    if len(reasons) == 1:
+        return reasons[0]
+    return ", ".join(reasons[:-1]) + f" y {reasons[-1]}"
+
+
+def _equity_intro(eq_pct: float, realized_pct: float, realization: dict) -> str:
+    """Fragmento inicial de la explicación con AMBAS cifras (equity cruda Y
+    realizada) cuando R<1; con R==1 (heads-up y en posición, mano
+    jugable) no hay nada que explicar de más y se mantiene la frase de
+    siempre — no queremos volver a foldear de más los calls buenos."""
+    if realization["r"] >= 0.999:
+        return f"Tu equity estimada (~{eq_pct}%)"
+    reasons_text = _realization_reasons_text(realization)
+    return (
+        f"Tu equity cruda es ~{eq_pct}%, pero {reasons_text}, así que realizas de verdad "
+        f"solo ~{realized_pct}%"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Recomendación final (v1, PLANTILLA — nada de IA): traduce los números YA
 # calculados arriba (equity estimada vs required_equity_pct de pot_odds, y el
 # breakeven de una subida estándar) en fold/call/raise + color, con una
@@ -198,10 +362,19 @@ def _raise_size_rationale(hand: Hand, raise_to: float) -> str:
 
 
 def derive_recommendation(
-    hand: Hand, hero_seat: int, to_call: float, po: dict, equity: dict | None, breakeven: dict | None
+    hand: Hand, hero_seat: int, to_call: float, po: dict, equity: dict | None, breakeven: dict | None,
+    villain_seat: int | None = None, active_villain_seats: list[int] | None = None,
 ) -> dict | None:
     """Ver los umbrales documentados arriba. Devuelve None si no hay equity
-    estimada (sin ella no hay número con el que fundamentar nada)."""
+    estimada (sin ella no hay número con el que fundamentar nada).
+
+    `villain_seat`/`active_villain_seats` (Tarea "factor de realización R"):
+    solo se usan en la rama to_call>0 — pagar una subida no es un all-in,
+    así que ahí se compara equity_realizada = equity_cruda * R contra pot
+    odds, no la equity cruda a secas (ver equity_realization_factor arriba).
+    La rama to_call<=0 (abrir una apuesta propia) sigue con la equity cruda
+    tal cual: ahí no hay pot odds que pagar, es una decisión distinta
+    (apostar por valor o no) fuera del alcance de este ajuste."""
     if equity is None:
         return None
 
@@ -233,8 +406,12 @@ def derive_recommendation(
             ),
         }
 
+    realization = equity_realization_factor(hand, hero_seat, villain_seat, active_villain_seats or [])
+    realized_pct = round(eq_pct * realization["r"], 2)
+    equity_intro = _equity_intro(eq_pct, realized_pct, realization)
+
     required = po["required_equity_pct"]
-    margin = eq_pct - required
+    margin = realized_pct - required
 
     if margin <= FOLD_MARGIN_PCT:
         return {
@@ -243,7 +420,7 @@ def derive_recommendation(
             "raise_to": None,
             "es_marginal": False,
             "explicacion": (
-                f"Tu equity estimada (~{eq_pct}%) no llega al {required}% que pide el bote -> pagar "
+                f"{equity_intro} no llega al {required}% que pide el bote -> pagar "
                 f"aquí pinta -EV, lo razonable es fold. {context}"
             ),
         }
@@ -256,7 +433,7 @@ def derive_recommendation(
             "raise_to": breakeven["raise_to"] if breakeven else None,
             "es_marginal": True,
             "explicacion": (
-                f"Tu equity estimada (~{eq_pct}%) está muy cerca del {required}% que pide el bote -> "
+                f"{equity_intro} está muy cerca del {required}% que pide el bote -> "
                 f"decisión marginal: call para controlar el bote{raise_hint}, ambas líneas son "
                 f"defendibles aquí, ninguna es un error grande. {context}"
             ),
@@ -269,7 +446,7 @@ def derive_recommendation(
             "raise_to": breakeven["raise_to"],
             "es_marginal": False,
             "explicacion": (
-                f"Tu equity estimada (~{eq_pct}%) supera el {required}% que pide el bote con margen "
+                f"{equity_intro} supera el {required}% que pide el bote con margen "
                 f"amplio y tu mano tiene ventaja clara sobre el rango del rival -> raise de valor a "
                 f"{breakeven['raise_to']}. {context}"
             ),
@@ -282,7 +459,7 @@ def derive_recommendation(
         "raise_to": None,
         "es_marginal": False,
         "explicacion": (
-            f"Tu equity estimada (~{eq_pct}%) supera el {required}% que pide el bote -> pagar es "
+            f"{equity_intro} supera el {required}% que pide el bote -> pagar es "
             f"rentable, pero sin ventaja tan clara como para inflar el bote -> call. {context}"
         ),
     }
@@ -348,7 +525,9 @@ def build_coach_response(hand: Hand, hero_seat: int) -> dict:
         equity = {**eq, "estimated": True}
         equity_note = criterion
 
-    recommendation = derive_recommendation(hand, hero_seat, to_call, po, equity, breakeven)
+    recommendation = derive_recommendation(
+        hand, hero_seat, to_call, po, equity, breakeven, villain_seat, active_villain_seats
+    )
 
     return {
         "street": hand.street.value,

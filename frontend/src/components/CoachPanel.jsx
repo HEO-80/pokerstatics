@@ -4,6 +4,7 @@ import { cardGlyph } from "@/lib/cardGlyphs";
 import { summarizePlayer } from "@/lib/villainStats";
 import { summarizeHand } from "@/lib/handSummary";
 import { PLAY } from "@/constants/testIds";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 
 // Colores de la recomendación final: los manda el backend (poker_coach.py,
 // derive_recommendation) como "red"/"blue"/"green" — aquí solo se traducen a
@@ -16,6 +17,29 @@ const RECOMMENDATION_STYLES = {
 
 export function recommendationLabel(rec) {
   if (rec.es_marginal) return "DECISIÓN MARGINAL";
+  switch (rec.accion_sugerida) {
+    case "fold":
+      return "Mejor FOLD";
+    case "check":
+      return "Haz CHECK";
+    case "call":
+      return "Haz CALL";
+    case "raise":
+      return rec.raise_to ? `Considera RAISE a ${rec.raise_to}` : "Considera RAISE";
+    default:
+      return rec.accion_sugerida;
+  }
+}
+
+/**
+ * Título del veredicto: igual que recommendationLabel pero SIN el atajo de
+ * "DECISIÓN MARGINAL" — el veredicto de arriba (Tarea "layout sin scroll"
+ * §3) quiere el título de la ACCIÓN ("HAZ CALL") con "MARGINAL" como badge
+ * aparte, no como texto que sustituye al título entero. Duplicado a
+ * propósito (no se toca `recommendationLabel`, que se reutiliza tal cual
+ * para la lectura por voz en HandTable.jsx y no debe cambiar de texto ahí).
+ */
+function verdictTitle(rec) {
   switch (rec.accion_sugerida) {
     case "fold":
       return "Mejor FOLD";
@@ -82,17 +106,24 @@ function buildNavigableSlides(coachAdviceLog, handHistory) {
  * vivo". Que el panel esté abierto o cerrado no afecta a qué datos existen,
  * solo a si se están mirando.
  *
- * Coach v2 (IA): vive aparte, en el panel "Coach IA" de la derecha (ver
- * AiCoachPanel.jsx / HandTable.jsx) — este componente ya no lo dispara ni
- * guarda su respuesta. `villainStyleText` (exportada más abajo) la reutiliza
- * tanto esta vista como el panel de la derecha para describir el estilo del
- * rival, sin duplicar el formateo del texto.
+ * Coach v2 (IA): vive aparte, en el panel "Coach IA" (ver AiCoachPanel.jsx /
+ * HandTable.jsx) — este componente ya no lo dispara ni guarda su respuesta.
+ * `villainStyleText` (exportada más abajo) la reutiliza tanto esta vista
+ * como el panel de Coach IA para describir el estilo del rival, sin
+ * duplicar el formateo del texto.
  *
  * Lectura por voz (lib/speech.js): HandTable.jsx dispara la lectura del
  * coach v1 de forma independiente de si ESTE panel está abierto o cerrado
  * (igual que ya hace con "Coach IA" — ver `liveAdviceEntry` ahí), así que
  * reutiliza `readingText`/`recommendationLabel` (exportadas más abajo) para
  * construir el texto a leer sin duplicar ese criterio.
+ *
+ * Layout (Tarea "layout sin scroll" §3): la raíz es `h-full flex flex-col`
+ * — la cabecera (contador + badge + flechas) es `shrink-0`, y el contenido
+ * de cada diapositiva decide su propio reparto interno (ver
+ * CoachAdviceEntryView: veredicto/tiles/barra son shrink-0, SOLO el bloque
+ * de acordeones es `flex-1 min-h-0 overflow-y-auto` — el único punto de
+ * scroll de todo el panel).
  */
 export default function CoachPanel({ active, coachAdviceLog, handHistory }) {
   const slides = useMemo(() => buildNavigableSlides(coachAdviceLog, handHistory), [coachAdviceLog, handHistory]);
@@ -126,7 +157,7 @@ export default function CoachPanel({ active, coachAdviceLog, handHistory }) {
 
   if (count === 0) {
     return (
-      <div className="text-sm text-[#475569] leading-snug">
+      <div className="h-full flex items-center text-sm text-[#475569] leading-snug">
         {active ? "Calculando el primer análisis…" : "Todavía no hay consejos en esta partida — juega tu primera mano."}
       </div>
     );
@@ -141,8 +172,8 @@ export default function CoachPanel({ active, coachAdviceLog, handHistory }) {
         : "bg-white/10 text-[#94A3B8]";
 
   return (
-    <div className="space-y-3 text-sm leading-relaxed">
-      <div className="flex items-center justify-between gap-2 text-xs">
+    <div className="h-full flex flex-col gap-2.5 text-sm leading-relaxed">
+      <div className="shrink-0 flex items-center justify-between gap-2 text-xs">
         <button
           type="button"
           data-testid={PLAY.coachPrevBtn}
@@ -173,8 +204,14 @@ export default function CoachPanel({ active, coachAdviceLog, handHistory }) {
         </button>
       </div>
 
-      {slide?.type === "advice" && <CoachAdviceEntryView entry={slide.entry} handHistory={handHistory} />}
-      {slide?.type === "handSummary" && <HandSummaryView hand={slide.hand} coachAdviceLog={coachAdviceLog} />}
+      {slide?.type === "advice" && (
+        <CoachAdviceEntryView key={slide.entry.id} entry={slide.entry} handHistory={handHistory} />
+      )}
+      {slide?.type === "handSummary" && (
+        <div className="flex-1 min-h-0 overflow-y-auto pr-0.5">
+          <HandSummaryView hand={slide.hand} coachAdviceLog={coachAdviceLog} />
+        </div>
+      )}
     </div>
   );
 }
@@ -279,93 +316,171 @@ function outcomeText(entry) {
   return `${actionWord}${resultWord ? " " + resultWord : " (la mano seguía en juego)."}`;
 }
 
-function CoachAdviceEntryView({ entry, handHistory }) {
-  const villainSummary = entry.villainName ? summarizePlayer(handHistory, entry.villainName) : null;
-
+/** Una celda de número (POT ODDS/EQUITY/BREAKEVEN) del grid de 3 (Tarea
+ * "layout sin scroll" §3) — "—" cuando ese dato no aplica al spot (p.ej. no
+ * hay pot odds si no hay nada que pagar). */
+function NumberTile({ label, value, colorClass }) {
   return (
-    <div className="space-y-3">
-      {/* 1) Situación */}
-      <div className="text-[#94A3B8]">
-        {situationText(entry)} Tus cartas: <CardText cards={entry.heroCards} />
-        {entry.board.length > 0 && (
-          <>
-            {" "}
-            · Board <CardText cards={entry.board} />
-          </>
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1.5 flex flex-col items-center text-center gap-0.5">
+      <div className="text-[9px] uppercase tracking-widest text-[#475569]">{label}</div>
+      <div className={`font-mono-poker font-bold text-sm ${colorClass}`}>{value}</div>
+    </div>
+  );
+}
+
+/** Barra "NECESITAS X% vs TIENES Y%": relleno verde al % de equity y marca
+ * ámbar vertical en el % requerido — comunica de un vistazo si el call es
+ * rentable, sin tener que leer los tiles de arriba número a número. */
+function EquityBar({ requiredPct, equityPct }) {
+  const req = Math.max(0, Math.min(100, requiredPct));
+  const eq = Math.max(0, Math.min(100, equityPct));
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[10px] font-mono-poker">
+        <span className="text-[#475569]">
+          NECESITAS <span className="text-[#F59E0B] font-bold">{requiredPct}%</span>
+        </span>
+        <span className="text-[#475569]">
+          TIENES <span className="text-[#10B981] font-bold">{equityPct}%</span>
+        </span>
+      </div>
+      <div className="relative h-2 rounded-full bg-white/8 overflow-hidden">
+        <div className="absolute inset-y-0 left-0 rounded-full bg-[#10B981]" style={{ width: `${eq}%` }} />
+        <div className="absolute inset-y-0 w-0.5 bg-[#F59E0B]" style={{ left: `${req}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/** Veredicto ARRIBA (Tarea "layout sin scroll" §3): título grande de la
+ * acción + badge "MARGINAL" aparte (ver verdictTitle) + una línea corta de
+ * justificación — el razonamiento COMPLETO (situación/lectura/explicación)
+ * vive en el acordeón "Por qué", abierto por defecto justo debajo. */
+function VerdictCard({ recommendation }) {
+  const styles = RECOMMENDATION_STYLES[recommendation.color] ?? { border: "border-white/12", bg: "", text: "text-white" };
+  return (
+    <div className={`shrink-0 rounded-lg border p-3 ${styles.border} ${styles.bg}`}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className={`font-display font-bold uppercase tracking-wide text-lg leading-tight ${styles.text}`}>
+          {verdictTitle(recommendation)}
+        </div>
+        {recommendation.es_marginal && (
+          <span className="px-1.5 py-0.5 rounded uppercase tracking-widest text-[9px] font-bold bg-[#F59E0B]/20 text-[#F59E0B]">
+            Marginal
+          </span>
         )}
       </div>
+      <div className="text-[#94A3B8] text-xs mt-1 line-clamp-2">{recommendation.explicacion}</div>
+    </div>
+  );
+}
 
-      {/* 2) Pot odds */}
-      <div>
-        <div className="text-[11px] uppercase tracking-widest text-[#475569] mb-0.5">Pot odds</div>
-        <div className="text-white">
-          {entry.toCall > 0
-            ? `Para pagar necesitas ganar al menos ${entry.potOdds.required_equity_pct}% (el bote te da ${entry.potOdds.ratio}).`
-            : "No hay nada que pagar ahora mismo."}
+function CoachAdviceEntryView({ entry, handHistory }) {
+  const villainSummary = entry.villainName ? summarizePlayer(handHistory, entry.villainName) : null;
+  const eq = entry.equity;
+  const hasPotOdds = entry.toCall > 0;
+  const required = hasPotOdds ? entry.potOdds.required_equity_pct : null;
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col gap-2.5">
+      {entry.recommendation ? (
+        <VerdictCard recommendation={entry.recommendation} />
+      ) : (
+        <div className="shrink-0 text-[#475569] text-xs">Sin recomendación para este spot.</div>
+      )}
+
+      {(hasPotOdds || eq || entry.breakeven) && (
+        <div className="shrink-0 grid grid-cols-3 gap-2">
+          <NumberTile label="Pot odds" value={hasPotOdds ? `${required}%` : "—"} colorClass="text-[#F59E0B]" />
+          <NumberTile label="Equity" value={eq ? `${eq.equity_pct}%` : "—"} colorClass="text-[#10B981]" />
+          <NumberTile
+            label="Breakeven"
+            value={entry.breakeven ? `${entry.breakeven.required_fold_pct}%` : "—"}
+            colorClass="text-[#EC4899]"
+          />
         </div>
+      )}
+
+      {hasPotOdds && eq ? (
+        <div className="shrink-0">
+          <EquityBar requiredPct={required} equityPct={eq.equity_pct} />
+        </div>
+      ) : (
+        !hasPotOdds && (
+          <div className="shrink-0 text-[10px] text-[#475569]">
+            No hay nada que pagar ahora mismo: la decisión es apostar por valor/farol o pasar, no hay pot
+            odds que comparar.
+          </div>
+        )
+      )}
+
+      {/* Acordeones plegables (Tarea "layout sin scroll" §3): único bloque
+          con scroll de todo el panel — el texto largo ya no empuja el
+          layout. `key={entry.id}` en el padre (CoachPanel) remonta el
+          Accordion al cambiar de consejo, así vuelve siempre al estado por
+          defecto (POR QUÉ abierto) en vez de arrastrar el estado de la
+          diapositiva anterior. */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <Accordion type="multiple" defaultValue={["why"]} className="text-xs">
+          <AccordionItem value="why" className="border-white/8">
+            <AccordionTrigger className="py-2 text-[11px] uppercase tracking-widest text-[#94A3B8] hover:no-underline hover:text-white">
+              Por qué
+            </AccordionTrigger>
+            <AccordionContent className="pt-0 pb-3 space-y-2 text-[#94A3B8]">
+              <div>
+                {situationText(entry)} Tus cartas: <CardText cards={entry.heroCards} />
+                {entry.board.length > 0 && (
+                  <>
+                    {" "}
+                    · Board <CardText cards={entry.board} />
+                  </>
+                )}
+              </div>
+              <div>{readingText(entry)}</div>
+              {entry.recommendation && <div className="text-white">{entry.recommendation.explicacion}</div>}
+              {entry.recommendation?.raise_size_rationale && (
+                <div className="text-[#FCD34D] text-xs font-medium">{entry.recommendation.raise_size_rationale}</div>
+              )}
+              {outcomeText(entry) && <div className="text-[#475569] text-xs">{outcomeText(entry)}</div>}
+              <div className="text-[10px] text-[#475569]">Esto es orientativo — la decisión final siempre es tuya.</div>
+            </AccordionContent>
+          </AccordionItem>
+
+          {eq && (
+            <AccordionItem value="villain" className="border-white/8">
+              <AccordionTrigger className="py-2 text-[11px] uppercase tracking-widest text-[#94A3B8] hover:no-underline hover:text-white">
+                Lectura del rival
+              </AccordionTrigger>
+              <AccordionContent className="pt-0 pb-3 space-y-1.5 text-[#94A3B8]">
+                <div>{entry.equityNote}</div>
+                {entry.multiway && (
+                  <div className="text-[#F59E0B]">
+                    Hay más de un rival en la mano: esta equity aproxima como si fuera mano a mano solo
+                    contra {villainOrRival(entry)} (el resto de rivales no entra en el cálculo).
+                  </div>
+                )}
+                {villainStyleText(villainSummary) && (
+                  <div>
+                    Estilo de esta sesión (por frecuencias, no adivina su mano): {villainStyleText(villainSummary)}
+                  </div>
+                )}
+              </AccordionContent>
+            </AccordionItem>
+          )}
+
+          {entry.breakeven && (
+            <AccordionItem value="raise" className="border-white/8 border-b-0">
+              <AccordionTrigger className="py-2 text-[11px] uppercase tracking-widest text-[#94A3B8] hover:no-underline hover:text-white">
+                Si subes a {entry.breakeven.raise_to}
+              </AccordionTrigger>
+              <AccordionContent className="pt-0 pb-3 text-[#94A3B8]">
+                Necesitas que {villainOrRival(entry)} se retire al menos el {entry.breakeven.required_fold_pct}%
+                de las veces para que sea rentable de inmediato.
+              </AccordionContent>
+            </AccordionItem>
+          )}
+        </Accordion>
       </div>
-
-      {/* 3) Equity estimada */}
-      {entry.equity && (
-        <div>
-          <div className="text-[11px] uppercase tracking-widest text-[#475569] mb-0.5">
-            Tu equity (estimada) vs {villainOrRival(entry)}
-          </div>
-          <div className="text-white">~{entry.equity.equity_pct}% contra su rango probable.</div>
-          <div className="text-[#475569] text-xs mt-0.5">{entry.equityNote}</div>
-          {entry.multiway && (
-            <div className="text-[#F59E0B] text-xs mt-0.5">
-              Hay más de un rival en la mano: esta equity aproxima como si fuera mano a mano solo contra{" "}
-              {villainOrRival(entry)} (el resto de rivales no entra en el cálculo).
-            </div>
-          )}
-          {villainStyleText(villainSummary) && (
-            <div className="text-[#475569] text-xs mt-1">
-              Estilo de esta sesión (por frecuencias, no adivina su mano): {villainStyleText(villainSummary)}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 4) Breakeven de una subida estándar */}
-      {entry.breakeven && (
-        <div>
-          <div className="text-[11px] uppercase tracking-widest text-[#475569] mb-0.5">Breakeven si subes</div>
-          <div className="text-white">
-            Si subes a {entry.breakeven.raise_to}, necesitas que {villainOrRival(entry)} se retire al menos el{" "}
-            {entry.breakeven.required_fold_pct}% de las veces para que sea rentable de inmediato.
-          </div>
-        </div>
-      )}
-
-      {/* 5) Lectura */}
-      <div className="pt-1.5 border-t border-white/8">
-        <div className="text-[11px] uppercase tracking-widest text-[#475569] mb-0.5">Lectura</div>
-        <div className="text-[#94A3B8]">{readingText(entry)}</div>
-      </div>
-
-      {/* Recomendación final, destacada con el color que manda el backend */}
-      {entry.recommendation && (
-        <div
-          className={`rounded-lg border p-3 ${RECOMMENDATION_STYLES[entry.recommendation.color]?.border ?? "border-white/12"} ${
-            RECOMMENDATION_STYLES[entry.recommendation.color]?.bg ?? ""
-          }`}
-        >
-          <div
-            className={`font-display font-bold uppercase tracking-wide text-sm ${
-              RECOMMENDATION_STYLES[entry.recommendation.color]?.text ?? "text-white"
-            }`}
-          >
-            {recommendationLabel(entry.recommendation)}
-          </div>
-          <div className="text-[#94A3B8] mt-1">{entry.recommendation.explicacion}</div>
-          {entry.recommendation.raise_size_rationale && (
-            <div className="text-[#FCD34D] text-xs font-medium mt-1.5">{entry.recommendation.raise_size_rationale}</div>
-          )}
-          {outcomeText(entry) && <div className="text-[#475569] text-xs mt-1.5">{outcomeText(entry)}</div>}
-          <div className="text-[10px] text-[#475569] mt-1.5">Esto es orientativo — la decisión final siempre es tuya.</div>
-        </div>
-      )}
     </div>
   );
 }

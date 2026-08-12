@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { Crown, RotateCw, LogOut, Skull, Trophy, TrendingUp } from "lucide-react";
+import { Crown, RotateCw, LogOut, Skull, Trophy } from "lucide-react";
 import HandTable from "@/components/HandTable";
 import ActivityLog from "@/components/ActivityLog";
 import SessionSummary from "@/components/SessionSummary";
@@ -7,6 +7,7 @@ import { createTableHand } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { usePointsProgress } from "@/hooks/usePointsProgress";
+import { useNavBarStats } from "@/hooks/useNavBarStats";
 import { SITANDGO } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
 import { pickRandomNames } from "@/lib/playerNames";
@@ -229,247 +230,48 @@ export default function SitAndGo() {
       }
     : view;
 
+  // Cápsula de stats en la NavBar (Tarea "layout sin scroll" §1): sustituye
+  // a la vieja segunda barra "SIT & GO … SALIR" que vivía aquí — el icono/
+  // título ya no hace falta (la pestaña activa de la NavBar ya dice dónde
+  // estás). Solo se publica mientras hay una mano en curso; en cualquier
+  // otra fase (lobby/exited/busted/won) se publica null y la NavBar vuelve a
+  // su estado normal sin cápsula.
+  useNavBarStats(
+    phase === "playing" && view
+      ? {
+          mesa: "SIT&GO",
+          jugadores: `${survivorsLeft}/${TOTAL_SEATS}`,
+          stack: heroStack,
+          nivel: levelInfo.level,
+          nivelHint: `Sube en ${Math.max(1, survivorsLeft - levelInfo.handsAtLevel)} mano${
+            Math.max(1, survivorsLeft - levelInfo.handsAtLevel) === 1 ? "" : "s"
+          }`,
+          ciegas: `${blindsForLevel(levelInfo.level).sb}/${blindsForLevel(levelInfo.level).bb}`,
+          onExit: () => setPhase("exited"),
+          exitTestId: SITANDGO.exitBtn,
+        }
+      : null,
+  );
+
+  // Cadena de alturas (Tarea "layout sin scroll" §2): la raíz es h-full
+  // (100% del hueco que App.js ya deja bajo la NavBar) + flex-col +
+  // overflow-hidden, y el ÚNICO hijo que puede crecer es flex-1 min-h-0.
+  // Solo la vista "playing" (mesa en juego) usa ese hijo SIN scroll propio
+  // (HandTable gestiona su propio overflow interno, ver ese componente) —
+  // las demás fases (lobby/resumen de fin de partida) van en un contenedor
+  // hermano con overflow-y-auto: no son "la sesión en vivo" que pide el
+  // spec caber sin scroll, y un resumen largo (muchas manos) no debe quedar
+  // inalcanzable por un overflow-hidden estricto.
   return (
-    <div data-testid={SITANDGO.screen} className="w-full px-3 sm:px-6 py-3">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] flex items-center justify-center shrink-0">
-            <Crown className="w-3.5 h-3.5 text-white" />
-          </div>
-          <h1 className="font-display font-bold text-sm uppercase tracking-tight text-white">
-            Sit &amp; Go
-          </h1>
-        </div>
-        {phase === "playing" && view && (
-          <div className="flex items-center gap-4">
-            <div className="text-xs text-[#475569] font-mono-poker">
-              Quedan <span className="text-white font-bold">{survivorsLeft}</span>/{TOTAL_SEATS} · Tu
-              stack: <span className="text-white font-bold">{heroStack}</span>
-            </div>
-            <div
-              data-testid={SITANDGO.levelBadge}
-              className="flex items-center gap-1.5 text-xs text-[#475569] font-mono-poker"
-            >
-              <TrendingUp className="w-3.5 h-3.5" />
-              Nivel <span className="text-white font-bold">{levelInfo.level}</span> · Ciegas{" "}
-              <span className="text-white font-bold">
-                {blindsForLevel(levelInfo.level).sb}/{blindsForLevel(levelInfo.level).bb}
-              </span>
-              <span className="text-[#475569]">
-                · Sube en {Math.max(1, survivorsLeft - levelInfo.handsAtLevel)} mano
-                {Math.max(1, survivorsLeft - levelInfo.handsAtLevel) === 1 ? "" : "s"}
-              </span>
-            </div>
-            <button
-              data-testid={SITANDGO.exitBtn}
-              onClick={() => setPhase("exited")}
-              className="px-4 py-2 rounded-lg border border-white/12 text-white text-sm font-display uppercase tracking-wider hover:bg-white/5 transition-colors inline-flex items-center gap-2"
-            >
-              <LogOut className="w-4 h-4" /> Salir
-            </button>
-          </div>
-        )}
-      </div>
-
-      {phase === "lobby" && (
-        <form
-          data-testid={SITANDGO.lobby}
-          onSubmit={startSitAndGo}
-          className="glass-panel rounded-2xl p-6 grid grid-cols-2 md:grid-cols-4 gap-4 items-end max-w-2xl"
-        >
-          <div className="col-span-2 md:col-span-4 text-xs text-[#94A3B8]">
-            Mesa única de {TOTAL_SEATS} jugadores (tú + {TOTAL_SEATS - 1} bots). Se juega hasta que
-            quede 1. Ciegas iniciales{" "}
-            <span className="text-white font-mono-poker font-bold">
-              {blindsForLevel(lobby.startLevel).sb}/{blindsForLevel(lobby.startLevel).bb}
-            </span>{" "}
-            (Nivel {lobby.startLevel}) — suben solas cada vez que el botón completa una vuelta a la mesa.
-          </div>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">¿Cómo te llamas?</span>
-            <input
-              type="text"
-              data-testid={SITANDGO.heroNameInput}
-              placeholder="Hero"
-              maxLength={20}
-              value={lobby.heroName}
-              onChange={(e) => setLobby((l) => ({ ...l, heroName: e.target.value }))}
-              className={fieldClass}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">Stack inicial</span>
-            <input
-              type="number"
-              min={1}
-              value={lobby.startingStack}
-              onChange={(e) => {
-                const startingStack = e.target.value;
-                const nextAllowed = allowedStartLevels(Number(startingStack) || 0);
-                const maxLevel = nextAllowed[nextAllowed.length - 1];
-                setLobby((l) => ({ ...l, startingStack, startLevel: Math.min(l.startLevel, maxLevel) }));
-              }}
-              className={fieldClass}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">Nivel inicial</span>
-            <select
-              data-testid={SITANDGO.startLevelSelect}
-              value={lobby.startLevel}
-              onChange={(e) => setLobby((l) => ({ ...l, startLevel: Number(e.target.value) }))}
-              className={fieldClass}
-            >
-              {lobbyAllowedLevels.map((lvl) => {
-                const blinds = blindsForLevel(lvl);
-                return (
-                  <option key={lvl} value={lvl}>
-                    Nivel {lvl} · Ciegas {blinds.sb}/{blinds.bb}
-                  </option>
-                );
-              })}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">Perfil de bots</span>
-            <select
-              value={lobby.botProfile}
-              onChange={(e) => setLobby((l) => ({ ...l, botProfile: e.target.value }))}
-              className={fieldClass}
-            >
-              {PROFILES.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <button
-            type="submit"
-            data-testid={SITANDGO.startBtn}
-            disabled={loading}
-            className="col-span-2 md:col-span-4 mt-2 px-6 py-4 rounded-xl bg-white text-black font-display font-bold uppercase tracking-wider hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
-          >
-            <Crown className="w-5 h-5" /> Empezar Sit &amp; Go
-          </button>
-        </form>
-      )}
-
-      {phase === "lobby" && handHistory.length > 0 && (
-        <div className="max-w-2xl mt-4">
-          <div className="text-xs text-[#94A3B8] mb-2">
-            Historial de la última partida (sin terminar) — se borra al empezar un Sit&amp;Go nuevo.
-          </div>
-          <ActivityLog
-            handHistory={handHistory}
-            className="glass-panel rounded-2xl p-3 max-h-64 overflow-y-auto"
-          />
-        </div>
-      )}
-
+    <div data-testid={SITANDGO.screen} className="h-full flex flex-col overflow-hidden">
       {error && (
-        <div className="mt-4 p-4 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/40 text-[#EF4444] text-sm">
+        <div className="shrink-0 mx-3 sm:mx-6 mt-3 p-4 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/40 text-[#EF4444] text-sm">
           {error}
         </div>
       )}
 
-      {phase === "playing" && !view && (
-        <div className="mt-10 text-center text-[#94A3B8] font-display uppercase tracking-wider">
-          Repartiendo…
-        </div>
-      )}
-
-      {phase === "exited" && (
-        <div
-          data-testid={SITANDGO.exitedScreen}
-          className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
-        >
-          <LogOut className="w-16 h-16 text-[#94A3B8] mx-auto mb-4" />
-          <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-            Has salido del Sit &amp; Go
-          </div>
-          <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
-          <div className="mb-6 text-left">
-            <SessionSummary
-              coachAdviceLog={coachAdviceLog}
-              handsPlayed={handHistory.length}
-              resultLine={`Saliste con ${heroStack} fichas · quedaban ${survivorsLeft}/${TOTAL_SEATS}`}
-              totalPoints={pointsProgress.totalPoints}
-            />
-          </div>
-          <button
-            data-testid={SITANDGO.backToLobbyBtn}
-            onClick={backToLobby}
-            className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-          >
-            <RotateCw className="w-4 h-4" /> Volver al lobby
-          </button>
-        </div>
-      )}
-
-      {phase === "busted" && (
-        <div
-          data-testid={SITANDGO.bustedScreen}
-          className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
-        >
-          <Skull className="w-16 h-16 text-[#EF4444] mx-auto mb-4" />
-          <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-            Has quedado en posición {finalPosition}
-          </div>
-          <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
-          <div className="mb-6 text-left">
-            <SessionSummary
-              coachAdviceLog={coachAdviceLog}
-              handsPlayed={handHistory.length}
-              resultLine={`Posición ${finalPosition} de ${TOTAL_SEATS}`}
-              totalPoints={pointsProgress.totalPoints}
-            />
-          </div>
-          <button
-            data-testid={SITANDGO.backToLobbyBtn}
-            onClick={backToLobby}
-            className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-          >
-            <RotateCw className="w-4 h-4" /> Volver al lobby
-          </button>
-        </div>
-      )}
-
-      {phase === "won" && (
-        <div
-          data-testid={SITANDGO.wonScreen}
-          className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto glow-correct"
-        >
-          <Trophy className="w-16 h-16 text-[#F59E0B] mx-auto mb-4" />
-          <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-            ¡Has ganado el Sit &amp; Go!
-          </div>
-          <div className="text-[#94A3B8] mb-6">Te quedaste con todas las fichas de la mesa.</div>
-          <div className="mb-6 text-left">
-            <SessionSummary
-              coachAdviceLog={coachAdviceLog}
-              handsPlayed={handHistory.length}
-              resultLine="¡Ganaste el Sit&Go!"
-              totalPoints={pointsProgress.totalPoints}
-            />
-          </div>
-          <button
-            data-testid={SITANDGO.backToLobbyBtn}
-            onClick={backToLobby}
-            className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-          >
-            <RotateCw className="w-4 h-4" /> Volver al lobby
-          </button>
-        </div>
-      )}
-
-      {phase === "playing" && view && (
-        <div className="mt-2">
+      {phase === "playing" && view ? (
+        <div className="flex-1 min-h-0 flex px-3 sm:px-6 py-2">
           <HandTable
             view={displayView}
             roles={roles}
@@ -510,6 +312,199 @@ export default function SitAndGo() {
               )
             }
           />
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-3">
+          {phase === "lobby" && (
+            <form
+              data-testid={SITANDGO.lobby}
+              onSubmit={startSitAndGo}
+              className="glass-panel rounded-2xl p-6 grid grid-cols-2 md:grid-cols-4 gap-4 items-end max-w-2xl"
+            >
+              <div className="col-span-2 md:col-span-4 text-xs text-[#94A3B8]">
+                Mesa única de {TOTAL_SEATS} jugadores (tú + {TOTAL_SEATS - 1} bots). Se juega hasta que
+                quede 1. Ciegas iniciales{" "}
+                <span className="text-white font-mono-poker font-bold">
+                  {blindsForLevel(lobby.startLevel).sb}/{blindsForLevel(lobby.startLevel).bb}
+                </span>{" "}
+                (Nivel {lobby.startLevel}) — suben solas cada vez que el botón completa una vuelta a la mesa.
+              </div>
+
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] uppercase tracking-widest text-[#475569]">¿Cómo te llamas?</span>
+                <input
+                  type="text"
+                  data-testid={SITANDGO.heroNameInput}
+                  placeholder="Hero"
+                  maxLength={20}
+                  value={lobby.heroName}
+                  onChange={(e) => setLobby((l) => ({ ...l, heroName: e.target.value }))}
+                  className={fieldClass}
+                />
+              </label>
+
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] uppercase tracking-widest text-[#475569]">Stack inicial</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={lobby.startingStack}
+                  onChange={(e) => {
+                    const startingStack = e.target.value;
+                    const nextAllowed = allowedStartLevels(Number(startingStack) || 0);
+                    const maxLevel = nextAllowed[nextAllowed.length - 1];
+                    setLobby((l) => ({ ...l, startingStack, startLevel: Math.min(l.startLevel, maxLevel) }));
+                  }}
+                  className={fieldClass}
+                />
+              </label>
+
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] uppercase tracking-widest text-[#475569]">Nivel inicial</span>
+                <select
+                  data-testid={SITANDGO.startLevelSelect}
+                  value={lobby.startLevel}
+                  onChange={(e) => setLobby((l) => ({ ...l, startLevel: Number(e.target.value) }))}
+                  className={fieldClass}
+                >
+                  {lobbyAllowedLevels.map((lvl) => {
+                    const blinds = blindsForLevel(lvl);
+                    return (
+                      <option key={lvl} value={lvl}>
+                        Nivel {lvl} · Ciegas {blinds.sb}/{blinds.bb}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] uppercase tracking-widest text-[#475569]">Perfil de bots</span>
+                <select
+                  value={lobby.botProfile}
+                  onChange={(e) => setLobby((l) => ({ ...l, botProfile: e.target.value }))}
+                  className={fieldClass}
+                >
+                  {PROFILES.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="submit"
+                data-testid={SITANDGO.startBtn}
+                disabled={loading}
+                className="col-span-2 md:col-span-4 mt-2 px-6 py-4 rounded-xl bg-white text-black font-display font-bold uppercase tracking-wider hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+              >
+                <Crown className="w-5 h-5" /> Empezar Sit &amp; Go
+              </button>
+            </form>
+          )}
+
+          {phase === "lobby" && handHistory.length > 0 && (
+            <div className="max-w-2xl mt-4">
+              <div className="text-xs text-[#94A3B8] mb-2">
+                Historial de la última partida (sin terminar) — se borra al empezar un Sit&amp;Go nuevo.
+              </div>
+              <ActivityLog
+                handHistory={handHistory}
+                className="glass-panel rounded-2xl p-3 max-h-64 overflow-y-auto"
+              />
+            </div>
+          )}
+
+          {phase === "playing" && !view && (
+            <div className="mt-10 text-center text-[#94A3B8] font-display uppercase tracking-wider">
+              Repartiendo…
+            </div>
+          )}
+
+          {phase === "exited" && (
+            <div
+              data-testid={SITANDGO.exitedScreen}
+              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
+            >
+              <LogOut className="w-16 h-16 text-[#94A3B8] mx-auto mb-4" />
+              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                Has salido del Sit &amp; Go
+              </div>
+              <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
+              <div className="mb-6 text-left">
+                <SessionSummary
+                  coachAdviceLog={coachAdviceLog}
+                  handsPlayed={handHistory.length}
+                  resultLine={`Saliste con ${heroStack} fichas · quedaban ${survivorsLeft}/${TOTAL_SEATS}`}
+                  totalPoints={pointsProgress.totalPoints}
+                />
+              </div>
+              <button
+                data-testid={SITANDGO.backToLobbyBtn}
+                onClick={backToLobby}
+                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+              >
+                <RotateCw className="w-4 h-4" /> Volver al lobby
+              </button>
+            </div>
+          )}
+
+          {phase === "busted" && (
+            <div
+              data-testid={SITANDGO.bustedScreen}
+              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
+            >
+              <Skull className="w-16 h-16 text-[#EF4444] mx-auto mb-4" />
+              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                Has quedado en posición {finalPosition}
+              </div>
+              <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
+              <div className="mb-6 text-left">
+                <SessionSummary
+                  coachAdviceLog={coachAdviceLog}
+                  handsPlayed={handHistory.length}
+                  resultLine={`Posición ${finalPosition} de ${TOTAL_SEATS}`}
+                  totalPoints={pointsProgress.totalPoints}
+                />
+              </div>
+              <button
+                data-testid={SITANDGO.backToLobbyBtn}
+                onClick={backToLobby}
+                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+              >
+                <RotateCw className="w-4 h-4" /> Volver al lobby
+              </button>
+            </div>
+          )}
+
+          {phase === "won" && (
+            <div
+              data-testid={SITANDGO.wonScreen}
+              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto glow-correct"
+            >
+              <Trophy className="w-16 h-16 text-[#F59E0B] mx-auto mb-4" />
+              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                ¡Has ganado el Sit &amp; Go!
+              </div>
+              <div className="text-[#94A3B8] mb-6">Te quedaste con todas las fichas de la mesa.</div>
+              <div className="mb-6 text-left">
+                <SessionSummary
+                  coachAdviceLog={coachAdviceLog}
+                  handsPlayed={handHistory.length}
+                  resultLine="¡Ganaste el Sit&Go!"
+                  totalPoints={pointsProgress.totalPoints}
+                />
+              </div>
+              <button
+                data-testid={SITANDGO.backToLobbyBtn}
+                onClick={backToLobby}
+                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+              >
+                <RotateCw className="w-4 h-4" /> Volver al lobby
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

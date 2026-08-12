@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 
 import poker_coach
 import poker_table_api
-from poker_engine import make_card
+from poker_engine import make_card, pot_odds
 from poker_table import Hand, PlayerState, deck_with_known_cards
 from poker_table_api import table_router
 
@@ -306,3 +306,295 @@ def test_raise_size_rationale_clamped_to_all_in():
     text = poker_coach._raise_size_rationale(stub, 90)
     assert "todo lo que te queda de stack" in text
     assert "90" in text
+
+
+# =============================================================================
+# TAREA — Factor de REALIZACIÓN (R): pagar una subida NO es un all-in.
+# derive_recommendation() ahora compara equity_realizada = equity_cruda * R
+# contra pot odds (solo en la rama to_call>0) en vez de la equity cruda a
+# secas — ver equity_realization_factor() en poker_coach.py para la fórmula
+# completa (R_position * R_behind * R_multiway * R_playability).
+#
+# Estos tests usan una Hand REAL (para que to_act/posición/hole_cards salgan
+# de estados de mesa auténticos, no inventados) pero le pasan una `equity`
+# MANUAL a derive_recommendation (en vez de esperar al Monte Carlo real) —
+# así el punto exacto donde R hace bascular fold/call queda determinista y
+# no depende de la varianza de equity_vs_range.
+# =============================================================================
+def _build_oop_multiway_flop_spot(hero_card_a, hero_card_b) -> tuple:
+    """
+    4 jugadores (seats 0=BTN, 1=SB/hero, 2=BB, 3=UTG), mazo fijado para que
+    el hero (SB) reciba EXACTAMENTE `hero_card_a`/`hero_card_b`. Todos pagan
+    preflop sin subir -> flop con los 4 vivos (multiway real). En el flop
+    todos pasan hasta el BOTÓN (que actúa último, orden [SB, BB, UTG, BTN]);
+    el botón apuesta -> reabre la acción para SB/BB/UTG (en ese orden, el
+    orden postflop de siempre) -> es el turno del hero, que:
+      - está FUERA DE POSICIÓN respecto al agresor (el botón actúa DESPUÉS
+        de él en el orden postflop, ver _postflop_order/_hero_in_position);
+      - tiene 2 rivales (BB, UTG) TODAVÍA por actuar detrás suyo frente a
+        esta misma apuesta (riesgo real de resubida);
+      - el bote es multiway (3 rivales activos, no solo el agresor).
+    Ideal para comprobar que R aprieta manos "que cumplen las odds en el
+    papel" (J4o, 7To) en el peor spot posible para realizar esa equity.
+    """
+    prefix = [
+        hero_card_a,                    # seat1 (SB/hero) carta 1
+        make_card("2", "c"),             # seat2 (BB) carta 1 (relleno)
+        make_card("3", "c"),             # seat3 (UTG) carta 1 (relleno)
+        make_card("5", "c"),             # seat0 (BTN) carta 1 (relleno)
+        hero_card_b,                     # seat1 (SB/hero) carta 2
+        make_card("2", "d"),             # seat2 (BB) carta 2 (relleno)
+        make_card("3", "d"),             # seat3 (UTG) carta 2 (relleno)
+        make_card("5", "d"),             # seat0 (BTN) carta 2 (relleno)
+    ]
+    deck = deck_with_known_cards(prefix)
+    hand = Hand(
+        players=[
+            PlayerState(seat=0, name="BTN", stack=1000.0),
+            PlayerState(seat=1, name="Hero", stack=1000.0),
+            PlayerState(seat=2, name="BB", stack=1000.0),
+            PlayerState(seat=3, name="UTG", stack=1000.0),
+        ],
+        button_seat=0,
+        sb=5,
+        bb=10,
+        deck=deck,
+    )
+    assert hand.players[1].hole_cards == [hero_card_a, hero_card_b]
+
+    # Preflop: UTG, BTN, SB(hero) pagan; BB pasa (ya iguala con su ciega) ->
+    # los 4 ven el flop sin que nadie haya subido.
+    assert hand.current_seat == 3
+    hand.apply_action(3, "call")
+    assert hand.current_seat == 0
+    hand.apply_action(0, "call")
+    assert hand.current_seat == 1
+    hand.apply_action(1, "call")
+    assert hand.current_seat == 2
+    hand.apply_action(2, "check")
+    assert hand.street.value == "flop"
+
+    # Flop: hero(SB), BB, UTG pasan; BTN apuesta -> reabre para SB/BB/UTG.
+    assert hand.current_seat == 1
+    hand.apply_action(1, "check")
+    assert hand.current_seat == 2
+    hand.apply_action(2, "check")
+    assert hand.current_seat == 3
+    hand.apply_action(3, "check")
+    assert hand.current_seat == 0
+    hand.apply_action(0, "raise", to_amount=20)
+
+    assert hand.current_seat == 1  # el hero decide, con 2 rivales detrás (BB, UTG)
+    hero_seat = 1
+    to_call = hand.current_bet - hand.players[hero_seat].street_bet
+    po = pot_odds(to_call, hand.pot_total())
+    villain_seat = poker_coach.pick_villain_seat(hand, hero_seat)
+    active_villain_seats = [
+        s for s, p in hand.players.items()
+        if s != hero_seat and p.status.value != "folded"
+    ]
+    return hand, hero_seat, villain_seat, active_villain_seats, to_call, po
+
+
+def test_realization_factor_breakdown_in_oop_multiway_spot():
+    """Antes de mirar fold/call: confirma que equity_realization_factor()
+    detecta EXACTAMENTE lo que el spot tiene (fuera de posición, 2 rivales
+    detrás, bote multiway con 2 rivales extra) — si esto no coincide, los
+    tests de fold de abajo no estarían probando lo que dicen probar."""
+    hand, hero_seat, villain_seat, active_villain_seats, _, _ = _build_oop_multiway_flop_spot(
+        make_card("J", "d"), make_card("4", "h"),
+    )
+    assert villain_seat == 0  # el botón, último agresor
+    assert active_villain_seats == [0, 2, 3]
+
+    realization = poker_coach.equity_realization_factor(hand, hero_seat, villain_seat, active_villain_seats)
+    assert realization["in_position"] is False
+    assert realization["rivals_behind"] == 2
+    assert realization["extra_rivals_multiway"] == 2
+    assert realization["r_playability"] == poker_coach.PLAYABILITY_OFFSUIT_GAP_BIG  # J4o: gap>=3
+    assert realization["r"] < 1.0
+
+
+def test_j4o_multiway_oop_flips_from_call_to_fold_with_realization():
+    """J4o "cumple las odds" en el papel (raw margin > MARGINAL_BAND_PCT,
+    sería call sin R) pero fuera de posición y multiway con 2 rivales
+    detrás no realiza esa equity de verdad -> con R aplicado, fold."""
+    hand, hero_seat, villain_seat, active_villain_seats, to_call, po = _build_oop_multiway_flop_spot(
+        make_card("J", "d"), make_card("4", "h"),
+    )
+    realization = poker_coach.equity_realization_factor(hand, hero_seat, villain_seat, active_villain_seats)
+    required = po["required_equity_pct"]
+
+    # eq_pct elegido para que SIN R sea un call claro (margin > banda
+    # marginal) pero CON R (realization["r"] aquí ronda 0.55) caiga por
+    # debajo del umbral de fold -> demuestra el cambio de comportamiento,
+    # no solo un número fijo frágil ante retoques finos de las constantes.
+    eq_pct = required + 8.0
+    assert eq_pct - required > poker_coach.MARGINAL_BAND_PCT  # precondición: sin R sería call
+    assert eq_pct * realization["r"] - required <= poker_coach.FOLD_MARGIN_PCT  # con R, fold claro
+
+    equity = {"equity_pct": eq_pct}
+    rec = poker_coach.derive_recommendation(
+        hand, hero_seat, to_call, po, equity, None, villain_seat, active_villain_seats,
+    )
+    assert rec["accion_sugerida"] == "fold"
+
+    # La explicación enseña AMBAS cifras (cruda y realizada) y nombra el
+    # porqué, no solo el número final.
+    exp = rec["explicacion"]
+    assert f"~{eq_pct}%" in exp  # equity cruda
+    realized_pct = round(eq_pct * realization["r"], 2)
+    assert f"~{realized_pct}%" in exp  # equity realizada
+    assert "fuera de posición" in exp
+    assert "rival" in exp and "detrás" in exp
+    assert "multiway" in exp
+
+
+def test_7to_multiway_oop_flips_from_call_to_fold_with_realization():
+    """Mismo spot (OOP + multiway + rivales detrás) con 7To — el otro
+    ejemplo concreto del reporte de bug."""
+    hand, hero_seat, villain_seat, active_villain_seats, to_call, po = _build_oop_multiway_flop_spot(
+        make_card("T", "d"), make_card("7", "h"),
+    )
+    realization = poker_coach.equity_realization_factor(hand, hero_seat, villain_seat, active_villain_seats)
+    required = po["required_equity_pct"]
+
+    eq_pct = required + 8.0
+    assert eq_pct - required > poker_coach.MARGINAL_BAND_PCT
+    assert eq_pct * realization["r"] - required <= poker_coach.FOLD_MARGIN_PCT
+
+    equity = {"equity_pct": eq_pct}
+    rec = poker_coach.derive_recommendation(
+        hand, hero_seat, to_call, po, equity, None, villain_seat, active_villain_seats,
+    )
+    assert rec["accion_sugerida"] == "fold"
+
+
+def _build_heads_up_ip_flop_spot(hero_card_a, hero_card_b) -> tuple:
+    """
+    Heads-up: seat0=BTN/hero (en posición: actúa último postflop), seat1=BB.
+    Los dos ven el flop sin subidas; en el flop la BB (que actúa primero)
+    apuesta y el hero (BTN, en posición, sin nadie detrás) responde. Spot
+    "bueno" a propósito: contrapeso de los tests de arriba, para comprobar
+    que R NO aprieta de más un call legítimo (en posición, heads-up, sin
+    multiway) — condición explícita del ajuste.
+    """
+    prefix = [
+        hero_card_a,            # seat0 (BTN/hero) carta 1
+        make_card("2", "c"),   # seat1 (BB) carta 1 (relleno)
+        hero_card_b,            # seat0 (BTN/hero) carta 2
+        make_card("2", "d"),   # seat1 (BB) carta 2 (relleno)
+    ]
+    deck = deck_with_known_cards(prefix)
+    hand = Hand(
+        players=[
+            PlayerState(seat=0, name="Hero", stack=1000.0),
+            PlayerState(seat=1, name="Villano", stack=1000.0),
+        ],
+        button_seat=0,
+        sb=5,
+        bb=10,
+        deck=deck,
+    )
+    assert hand.players[0].hole_cards == [hero_card_a, hero_card_b]
+
+    # Preflop heads-up: botón/SB (hero) actúa primero -> paga; BB pasa.
+    assert hand.current_seat == 0
+    hand.apply_action(0, "call")
+    assert hand.current_seat == 1
+    hand.apply_action(1, "check")
+    assert hand.street.value == "flop"
+
+    # Flop: BB (villano) apuesta primero; hero (botón, en posición) responde.
+    assert hand.current_seat == 1
+    hand.apply_action(1, "raise", to_amount=20)
+
+    assert hand.current_seat == 0  # el hero decide, sin nadie detrás, heads-up
+    hero_seat = 0
+    to_call = hand.current_bet - hand.players[hero_seat].street_bet
+    po = pot_odds(to_call, hand.pot_total())
+    villain_seat = poker_coach.pick_villain_seat(hand, hero_seat)
+    active_villain_seats = [
+        s for s, p in hand.players.items()
+        if s != hero_seat and p.status.value != "folded"
+    ]
+    return hand, hero_seat, villain_seat, active_villain_seats, to_call, po
+
+
+def test_kqo_in_position_heads_up_stays_a_call():
+    """El caso que NO debe romperse: KQo, en posición, heads-up, sin
+    multiway y sin nadie por actuar detrás -> R debe quedar cerca de 1
+    (offsuit pero conectada: único descuento es playability, 0.95) y la
+    recomendación sigue siendo call, igual que antes del ajuste."""
+    hand, hero_seat, villain_seat, active_villain_seats, to_call, po = _build_heads_up_ip_flop_spot(
+        make_card("K", "s"), make_card("Q", "d"),
+    )
+    realization = poker_coach.equity_realization_factor(hand, hero_seat, villain_seat, active_villain_seats)
+    assert realization["in_position"] is True
+    assert realization["rivals_behind"] == 0
+    assert realization["extra_rivals_multiway"] == 0
+    assert realization["r"] >= 0.90  # cerca de 1, no un apretón fuerte
+
+    required = po["required_equity_pct"]
+    eq_pct = required + 15.0  # margen cómodo, ni marginal ni de raise (eq<55)
+    equity = {"equity_pct": eq_pct}
+    rec = poker_coach.derive_recommendation(
+        hand, hero_seat, to_call, po, equity, None, villain_seat, active_villain_seats,
+    )
+    assert rec["accion_sugerida"] == "call"
+
+
+def test_bb_defense_heads_up_cheap_price_stays_a_call_despite_oop():
+    """Condición explícita del ajuste: NO queremos volver a foldear de más.
+    La BB heads-up defendiendo con precio barato (to_call pequeño frente al
+    bote) está FUERA DE POSICIÓN, pero sin multiway y sin nadie detrás (R
+    solo baja por posición+jugabilidad) -> con una equity que YA cubre ese
+    precio barato con margen de sobra, sigue siendo call, no fold."""
+    prefix = [
+        make_card("K", "s"),   # seat0 (BTN) carta 1
+        make_card("9", "d"),   # seat1 (BB/hero) carta 1
+        make_card("Q", "s"),   # seat0 (BTN) carta 2
+        make_card("9", "h"),   # seat1 (BB/hero) carta 2 -> hero = 99, un par
+    ]
+    deck = deck_with_known_cards(prefix)
+    hand = Hand(
+        players=[
+            PlayerState(seat=0, name="Villano", stack=1000.0),
+            PlayerState(seat=1, name="Hero", stack=1000.0),
+        ],
+        button_seat=0,
+        sb=5,
+        bb=10,
+        deck=deck,
+    )
+    assert hand.players[1].hole_cards == [make_card("9", "d"), make_card("9", "h")]
+
+    # Preflop: botón sube pequeño (2.2x) -> BB (hero) enfrenta un precio
+    # barato de verdad (to_call bajo frente al bote ya formado).
+    hand.apply_action(0, "raise", to_amount=22)
+    assert hand.current_seat == 1
+    hero_seat = 1
+    to_call = hand.current_bet - hand.players[hero_seat].street_bet
+    po = pot_odds(to_call, hand.pot_total())
+    villain_seat = poker_coach.pick_villain_seat(hand, hero_seat)
+    active_villain_seats = [
+        s for s, p in hand.players.items()
+        if s != hero_seat and p.status.value != "folded"
+    ]
+
+    realization = poker_coach.equity_realization_factor(hand, hero_seat, villain_seat, active_villain_seats)
+    assert realization["in_position"] is False  # BB, heads-up, preflop -> OOP el resto de la mano
+    assert realization["rivals_behind"] == 0     # heads-up: nadie más por actuar
+    assert realization["extra_rivals_multiway"] == 0
+
+    required = po["required_equity_pct"]
+    # 99 de verdad (par) tiene equity real de sobra por encima de lo que
+    # pide un precio tan barato -> eq_pct con margen cómodo, no al límite.
+    eq_pct = required + 15.0
+    equity = {"equity_pct": eq_pct}
+    rec = poker_coach.derive_recommendation(
+        hand, hero_seat, to_call, po, equity, None, villain_seat, active_villain_seats,
+    )
+    assert rec["accion_sugerida"] == "call", (
+        f"R no debe apretar tanto que rompa una defensa barata OOP heads-up: {rec}"
+    )

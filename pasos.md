@@ -377,7 +377,7 @@ Para lo inmediato: cuando termines el log de actividad, mi propuesta es hacer es
 - ✅ Evaluador de color/escalera → NO era bug (verificado con 20k fuzz)
 
 ## MÁS ADELANTE
-- ⬜ Extraer charts de PokerCoaching (PDF) como más datos de rangos
+- ✅ Extraer charts de PokerCoaching (PDF) como más datos de rangos
 - ⬜ Limpiar residuos de Emergent (test_scenarios_api.py)
 
 ## PROYECTO NUEVO (separado)

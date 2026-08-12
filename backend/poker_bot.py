@@ -467,7 +467,7 @@ POSTFLOP_REBET_MULT = 2.5
 POSTFLOP_REBET_POT_CAP = 1.2  # tope = current_bet + pot_total() * este factor
 
 
-def _size_postflop_bet(hand, seat, legal, profile, rng=None) -> tuple:
+def _size_postflop_bet(hand, seat, legal, profile, rng=None, size_boost=0.0) -> tuple:
     """
     Apuesta/subida postflop: al ABRIR la apuesta de la calle (nadie ha
     apostado todavía, current_bet==0) es una fracción del bote actual
@@ -479,12 +479,18 @@ def _size_postflop_bet(hand, seat, legal, profile, rng=None) -> tuple:
     ninguna banda razonable) y compone sin límite si hay más de una
     resubida en la misma calle — la causa medida de la mayoría de los
     all-in "sin motivo" con stack profundo.
+
+    `size_boost` (Tarea afinar postflop): extra opcional sobre
+    `bet_size`, acotado al tope de 0.75 de siempre — lo usa
+    _postflop_decision para que una mano REALMENTE fuerte (bucket "strong")
+    apueste un pelín más grande por valor, sin salirse de la convención
+    0.5-0.75 de bote.
     """
     if "raise" not in legal:
         return ("all_in", None)
     min_to, max_to = legal["raise"]["min_to"], legal["raise"]["max_to"]
     params = PROFILE_PARAMS[profile]
-    bet_size = params["bet_size"]
+    bet_size = min(0.75, params["bet_size"] + size_boost)
 
     if hand.current_bet <= 0:
         target = hand.pot_total() * bet_size
@@ -660,6 +666,75 @@ def _hero_equity(hand, seat, iters, rng) -> float:
 STACK_WAR_COMMITTED_FRACTION = 0.45
 STACK_WAR_SHOVE_EQUITY = 0.75
 
+# ---------------------------------------------------------------------------
+# Buckets de equity postflop (Tarea "afinar heurística postflop, jugar más
+# humano/polarizado") — MEDIDO ANTES (3000 manos, 6-max, ver
+# measure_postflop.py / PASO0_POSTFLOP_MEASUREMENTS.md): el umbral único
+# `value_thresh` no distinguía "tengo lo mejor" de "tengo algo decente", así
+# que una mano MEDIA disparaba raise casi igual que una FUERTE (43.4% de las
+# veces que alguien enfrentaba una apuesta con equity 45-70% acababa en
+# subida, prácticamente sin pot control) y las manos DÉBILES pagaban de más
+# ante agresión (87.2% call global con equity<45%; 59.6%-96.9% según perfil
+# incluso con equity<35%, muy por encima de lo que pot odds reales exigen).
+#
+# `params["value_thresh"]` (0.45-0.65 según perfil) pasa a ser el límite
+# INFERIOR del bucket "medium" de CADA perfil — conserva el matiz por
+# perfil que ya tenía (nit exige más para considerar una mano "decente" que
+# lag) en vez de sustituirlo por un número único. El límite superior
+# ("strong", mano de valor consistente) es ese mismo umbral + un margen fijo
+# (STRONG_EQUITY_GAP), con un TECHO (STRONG_EQUITY_CEIL) para que un perfil
+# muy exigente (nit) no acabe "escondiendo" pasando manos que ya son
+# claramente fuertes en términos absolutos — así, con los perfiles
+# actuales:
+#   nit:     weak<65%   medium 65-75%   strong>=75%   (techo aplicado:
+#                                                       65+15=80 -> cap 75)
+#   tag:     weak<55%   medium 55-70%   strong>=70%   (banda ~igual a la
+#                                                       sugerida de ejemplo)
+#   lag:     weak<45%   medium 45-60%   strong>=60%
+#   station: weak<50%   medium 50-65%   strong>=65%
+# nit necesita una mano por delante para considerarla "de valor
+# consistente" (pasa más con manos buenas-pero-no-tanto); lag polariza
+# antes (con solo 60% ya juega la mano como fuerte) — la diferencia por
+# perfil pedida en la tarea queda en el propio umbral, no solo en la
+# frecuencia de farol, pero sin perder el "manos fuertes siempre apuestan"
+# para ningún perfil.
+STRONG_EQUITY_GAP = 0.15
+STRONG_EQUITY_CEIL = 0.75
+
+# Dentro del bucket "weak", una mano con ALGO de potencial (equity por
+# encima de este suelo — proyecto/backdoor/mejor de lo peor posible, según
+# la propia equity Monte Carlo que ya se calcula) farolea a la frecuencia
+# normal del perfil (`bluff_freq`); por debajo, sin nada que mejorar, el
+# farol se reduce a una fracción de esa frecuencia (WEAK_NO_POTENTIAL_BLUFF_MULT)
+# — "farolea con criterio" en vez de con probabilidad plana, tal cual pide
+# la tarea, reutilizando la equity que YA se calcula (sin nueva heurística
+# de texturas de board).
+BLUFF_POTENTIAL_FLOOR = 0.25
+WEAK_NO_POTENTIAL_BLUFF_MULT = 0.3
+
+# Ante una apuesta rival, una mano "weak" no se mide solo por pot odds: se
+# le exige este colchón EXTRA de equity para pagar (salvo el perfil
+# "station", que ya paga con casi cualquier cosa vía su call_margin alto de
+# por sí) — así el bot no paga "porque las pot odds técnicamente alcanzan"
+# con una mano floja, que es justo el "pagar hasta el final por pagar" que
+# la tarea pide evitar. MEDIDO ANTES: sin este colchón, hasta un nit pagaba
+# el 59.6% de las veces con equity<35% ante una apuesta.
+WEAK_FACING_BET_EXTRA_MARGIN = 0.15
+
+# Apuesta de valor ligeramente mayor con una mano REALMENTE fuerte (Tarea:
+# "opcional, mínimo") — sigue acotada al tope de bote de siempre (0.75) por
+# _size_postflop_bet.
+STRONG_VALUE_SIZE_BOOST = 0.05
+
+
+def _postflop_bucket(equity, value_thresh):
+    strong_thresh = min(value_thresh + STRONG_EQUITY_GAP, STRONG_EQUITY_CEIL)
+    if equity >= strong_thresh:
+        return "strong"
+    if equity >= value_thresh:
+        return "medium"
+    return "weak"
+
 
 def _postflop_decision(hand, seat, profile, iters, rng) -> tuple:
     params = PROFILE_PARAMS[profile]
@@ -667,25 +742,43 @@ def _postflop_decision(hand, seat, profile, iters, rng) -> tuple:
     legal = hand.legal_actions(seat)
     to_call = hand.current_bet - player.street_bet
     equity = _hero_equity(hand, seat, iters, rng)
+    bucket = _postflop_bucket(equity, params["value_thresh"])
 
     effective_stack = player.street_bet + player.stack
     already_a_war = effective_stack > 0 and hand.current_bet >= effective_stack * STACK_WAR_COMMITTED_FRACTION
     may_keep_raising = (not already_a_war) or equity >= STACK_WAR_SHOVE_EQUITY
 
+    has_potential = equity >= BLUFF_POTENTIAL_FLOOR
+    bluff_p = params["bluff_freq"] if has_potential else params["bluff_freq"] * WEAK_NO_POTENTIAL_BLUFF_MULT
+
     if to_call <= 0:
-        if equity >= params["value_thresh"] or rng.random() < params["bluff_freq"]:
+        # Fuerte: extrae valor de forma consistente, no se esconde pasando.
+        if bucket == "strong":
+            return _size_postflop_bet(hand, seat, legal, profile, rng, size_boost=STRONG_VALUE_SIZE_BOOST)
+        # Media: sobre todo pot control (pasa); solo a veces mano fina de
+        # valor — reutiliza bluff_freq del perfil como proxy de cuánto le
+        # gusta a este perfil meter presión también con manos no-premium.
+        if bucket == "medium":
+            if rng.random() < params["bluff_freq"]:
+                return _size_postflop_bet(hand, seat, legal, profile, rng)
+            return ("check", None)
+        # Débil: mayormente pasa; farol con criterio (más si hay potencial).
+        if rng.random() < bluff_p:
             return _size_postflop_bet(hand, seat, legal, profile, rng)
         return ("check", None)
 
-    if equity >= params["value_thresh"] and "raise" in legal and may_keep_raising:
-        return _size_postflop_bet(hand, seat, legal, profile, rng)
+    # Enfrentando una apuesta del rival.
+    if bucket == "strong" and "raise" in legal and may_keep_raising:
+        return _size_postflop_bet(hand, seat, legal, profile, rng, size_boost=STRONG_VALUE_SIZE_BOOST)
 
     pot_before = hand.pot_total()
     required = pot_odds(to_call, pot_before)["required_equity_pct"] / 100.0
+    if bucket == "weak" and profile != "station":
+        required += WEAK_FACING_BET_EXTRA_MARGIN
     if equity + params["call_margin"] >= required:
         return ("call", None)
 
-    if rng.random() < params["bluff_freq"] * 0.5 and "raise" in legal and may_keep_raising:
+    if rng.random() < bluff_p * 0.5 and "raise" in legal and may_keep_raising:
         return _size_postflop_bet(hand, seat, legal, profile, rng)
 
     return ("fold", None)

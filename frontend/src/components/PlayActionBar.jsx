@@ -55,13 +55,18 @@ export default function PlayActionBar({ legalActions, potTotal = 0, currentBet =
   };
 
   const btnBase =
-    "px-6 py-4 rounded-xl font-display font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+    "px-4 py-3 rounded-xl font-display font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
   const quickBtnBase =
     "px-2.5 py-1 rounded-md border border-white/12 text-[10px] uppercase tracking-wide text-[#94A3B8] hover:text-white hover:border-white/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+    <div className="space-y-2">
+      {/* grid-cols-4 (Tarea "layout sin scroll" §7): legal_actions() nunca
+          da más de 4 botones a la vez (fold + check-o-call + raise + all_in
+          son mutuamente excluyentes entre check/call), así que no hace
+          falta una 5ª columna fantasma — más compacto sin perder ningún
+          caso real. */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {legalActions.fold && (
           <button
             data-testid={PLAY.actionFold}
@@ -115,7 +120,7 @@ export default function PlayActionBar({ legalActions, potTotal = 0, currentBet =
       </div>
 
       {legalActions.raise && (
-        <div className="glass-panel rounded-xl p-4 space-y-3">
+        <div className="glass-panel rounded-xl p-2.5 space-y-1.5">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <span className="text-[10px] uppercase tracking-widest text-[#475569] shrink-0">
               Raise amount
