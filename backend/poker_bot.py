@@ -20,7 +20,7 @@ from __future__ import annotations
 import random
 
 from poker_engine import RANKS, RANK_TO_INT, card_str, equity_vs_range, pot_odds
-from poker_table import HandError, Street
+from poker_table import HandError, PlayerStatus, Street
 
 # ---------------------------------------------------------------------------
 # Perfiles de bot
@@ -36,7 +36,13 @@ from poker_table import HandError, Street
 #   pide el bote — se reutiliza tal cual en pot odds preflop (defensa de
 #   ciegas) y en pot odds postflop (_postflop_decision): los stations casi
 #   no necesitan margen (pagan con casi cualquier cosa), los nits sí.
-# value_thresh / bluff_freq / bet_size: postflop, ver _postflop_decision.
+# value_thresh / bluff_freq: postflop, ver _postflop_decision.
+# bet_size: fracción del bote apostada/subida postflop — SIEMPRE entre 0.5 y
+#   0.75 (convención NLHE de apuesta "media a 3/4 de bote", ver Tarea 2 de
+#   tamaños); ninguna PROFILE_PARAMS puede salirse de ese rango.
+# open_size_bb: apertura preflop — SIEMPRE entre 2.0 y 2.5x la ciega grande
+#   (_size_preflop_raise lo acota igualmente por si acaso, pero el valor
+#   base de cada perfil ya vive dentro del rango).
 PROFILE_PARAMS = {
     "nit": dict(
         raise_min=0.80, position_spread=0.05,
@@ -50,8 +56,8 @@ PROFILE_PARAMS = {
     ),
     "lag": dict(
         raise_min=0.45, position_spread=0.20,
-        value_thresh=0.45, call_margin=0.08, bluff_freq=0.22, bet_size=0.80,
-        open_size_bb=3.0,
+        value_thresh=0.45, call_margin=0.08, bluff_freq=0.22, bet_size=0.75,
+        open_size_bb=2.5,
     ),
     "station": dict(
         raise_min=0.88, position_spread=0.05,
@@ -92,6 +98,24 @@ PREFLOP_DECISION_JITTER = 0.05
 # Varianza en el TAMAÑO de la subida (Tarea 4): los humanos no abren
 # siempre a exactamente 2.5x, aunque esa sea su referencia — ±10%.
 PREFLOP_SIZE_JITTER = 0.10
+
+# Calibración "multiway pide mano mejor": cada bot decidía SOLO con sus
+# propias pot odds, ignorando cuánta gente ya había pagado la subida — y
+# esas pot odds encima MEJORAN con cada caller adicional (el bote crece,
+# el to_call no), así que la defensa por pot odds se retroalimentaba en
+# cascada: MEDIDO (3000 manos, 6-max, ver resumen de la tarea) media de
+# 3.03 jugadores viendo el flop, con el 10.6% de las manos llegando a 5+
+# jugadores — mucho más gente de la real ("normalmente 2, alguna vez 3,
+# rara vez 4+").
+#
+# Por cada rival que YA está activo en la mano (pagó, no foldeó) además
+# del que abrió, se exige este colchón extra de equity para pagar —
+# aproxima el motivo real: más rivales viendo el flop diluyen tu equity y
+# aumentan el riesgo de dominación, así que hace falta mano mejor para
+# seguir. El primer jugador en decidir tras el open (0 rivales extra)
+# juega exactamente igual que antes (heads-up, banda 40-80% de defensa ya
+# medida) — el ajuste solo entra en juego cuando alguien MÁS ya ha pagado.
+MULTIWAY_TIGHTEN_PER_RIVAL = 0.06
 
 
 def _preflop_equity_estimate(adjusted: float) -> float:
@@ -208,29 +232,154 @@ def _round_and_clamp(target: float, min_to: float, max_to: float) -> float:
     return max(min_to, min(target, max_to))
 
 
+# Profundidad de stack (en BB) por debajo de la cual jugar push/fold tiene
+# sentido (Tarea 2: "stack corto, ej. <15-20 ciegas grandes"): con un stack
+# así de corto, una subida "de libro" ya arrastra prácticamente todo el
+# stack de por sí, así que no hace falta (ni tiene sentido) limitarla más.
+SHORT_STACK_BB = 20
+
+# Con un stack YA profundo (no corto), ninguna subida "de libro" — ni
+# preflop ni postflop, tanto abrir/apostar como resubir — debe comerse más
+# de esta fracción del stack restante del bot. Es el tope DEFINITIVO que
+# garantiza "NO all-ins random con stack profundo" (Tarea 2): pase lo que
+# pase con la aritmética de bote/incremento (incluida una guerra de varias
+# resubidas seguidas en la misma calle), un stack profundo SIEMPRE se queda
+# con margen de sobra por debajo de max_to, así que jamás cae en el
+# clamp "target >= max_to -> all_in" salvo que la mano decida ir a por todas
+# a propósito (fuera del alcance de estas funciones de tamaño).
+DEEP_STACK_RAISE_CAP_FRACTION = 0.60
+
+
+def _cap_to_stack_fraction(target: float, hand, player) -> float:
+    effective_stack_bb = (player.street_bet + player.stack) / hand.bb
+    if effective_stack_bb <= SHORT_STACK_BB:
+        return target  # stack corto: push/fold, sin tope adicional.
+    cap = player.street_bet + player.stack * DEEP_STACK_RAISE_CAP_FRACTION
+    return min(target, cap)
+
+
+# ---------------------------------------------------------------------------
+# Tamaños de apuesta/subida — convenciones NLHE (medido y corregido en esta
+# tarea; ver docstring de _size_preflop_raise para los números de PASO 0).
+# ---------------------------------------------------------------------------
+# Resubida preflop (3-bet+): ~3x el INCREMENTO de la última subida
+# (hand.min_raise), no 3x el bote/apuesta TOTAL acumulada — esto último era
+# el bug: multiplicar el TOTAL en cada resubida sucesiva compone
+# geométricamente (abrir a 5 -> 3-bet a 15 -> "4-bet" a 45 -> 135...).
+PREFLOP_REBET_MULT = 3.0
+
+# Tope duro sobre cualquier resubida preflop, relativo al bote: por encima
+# de esto, si el stack es profundo de verdad (max_to grande), NO se deja que
+# la fórmula por sí sola empuje a un all-in "porque sí" — el stack profundo
+# se queda en una subida grande pero acotada. Con un stack YA corto,
+# max_to ya es pequeño de por sí y el clamp de abajo lo manda a all_in de
+# forma justificada (push/fold), sin necesitar este tope.
+PREFLOP_REBET_POT_CAP = 1.5  # tope = current_bet + pot_total() * este factor
+
+
 def _size_preflop_raise(hand, seat, legal, profile, rng=None) -> tuple:
+    """
+    MEDIDO ANTES de este cambio (2000 manos, 6-max, stacks de 100BB —
+    ver measure_sizing en el resumen de la tarea): las resubidas preflop
+    (3-bet+) llegaban hasta 80xBB (mediana razonable, 8xBB, pero con el 10%
+    por encima de 30xBB y el 5% por encima de 60xBB) y el 3.97% de TODAS las
+    acciones eran all-in — el 86% de esos all-in con un stack efectivo de
+    MÁS de 40BB (mediana: 97BB, básicamente el stack de salida entero). La
+    causa: `hand.current_bet * 3` en cada resubida multiplica el TOTAL
+    acumulado, no el incremento — compone geométricamente con cada resubida
+    sucesiva de la mano.
+
+    Ahora: abrir usa `open_size_bb` acotado SIEMPRE a [2.0, 2.5]xBB (Tarea
+    2); resubir usa el INCREMENTO de la última subida (`hand.min_raise`,
+    que poker_table.py ya actualiza a cada subida completa) × ~3, con un
+    tope adicional relativo al bote (PREFLOP_REBET_POT_CAP) para que ni una
+    guerra de varias resubidas seguidas dispare el número sin límite. Solo
+    se cae a all-in cuando el importe resultante YA supera el stack
+    disponible (`target >= max_to`) — con un stack profundo de verdad eso
+    ya no debería pasar por una simple subida "de libro".
+    """
     if "raise" not in legal:
         return ("all_in", None)
     min_to, max_to = legal["raise"]["min_to"], legal["raise"]["max_to"]
     params = PROFILE_PARAMS[profile]
     opening = hand.current_bet <= hand.bb
-    target = params["open_size_bb"] * hand.bb if opening else hand.current_bet * 3
+
+    if opening:
+        target = params["open_size_bb"] * hand.bb
+    else:
+        target = hand.current_bet + hand.min_raise * PREFLOP_REBET_MULT
+        pot_cap = hand.current_bet + hand.pot_total() * PREFLOP_REBET_POT_CAP
+        target = min(target, pot_cap)
+
     if rng is not None:
         # Varianza humana en el tamaño (Tarea 4): ±10%, no siempre el mismo
         # múltiplo exacto de bote/BB.
         target *= 1 + rng.uniform(-PREFLOP_SIZE_JITTER, PREFLOP_SIZE_JITTER)
+
+    if opening:
+        # El jitter no debe sacar la apertura de la banda 2-2.5x BB (Tarea 2).
+        target = max(2.0 * hand.bb, min(target, 2.5 * hand.bb))
+    else:
+        # Con stack profundo, ninguna resubida "de libro" se come más del
+        # 60% del stack restante (ver _cap_to_stack_fraction) — el tope
+        # DEFINITIVO contra el all-in "sin motivo".
+        target = _cap_to_stack_fraction(target, hand, hand.players[seat])
+
     target = _round_and_clamp(target, min_to, max_to)
     if target >= max_to:
         return ("all_in", None)
     return ("raise", target)
 
 
-def _size_postflop_bet(hand, seat, legal, profile) -> tuple:
+# Resubida postflop (raise sobre una apuesta ya hecha en la misma calle):
+# igual que la resubida preflop, ~el INCREMENTO de la última apuesta/subida
+# (hand.min_raise) × este multiplicador, con un tope relativo al bote — NO
+# "fracción del bote QUE HABRÍA tras igualar" aplicada sin más, que en la
+# práctica se mide MÁS GRANDE que el propio bote antes de la apuesta que
+# responde (una resubida por definición iguala + añade) y, peor, compone
+# igual que el bug preflop si hay más de una resubida en la misma calle:
+# MEDIDO (500 manos, ver resumen de la tarea) con esa fórmula, el 62% de
+# los all-in con stack efectivo >40BB ocurrían en el FLOP por esta vía —
+# ninguna resubida postflop caía dentro de ninguna banda razonable
+# (mediana 1.32x el bote antes de la apuesta, máximo 1.89x).
+POSTFLOP_REBET_MULT = 2.5
+POSTFLOP_REBET_POT_CAP = 1.2  # tope = current_bet + pot_total() * este factor
+
+
+def _size_postflop_bet(hand, seat, legal, profile, rng=None) -> tuple:
+    """
+    Apuesta/subida postflop: al ABRIR la apuesta de la calle (nadie ha
+    apostado todavía, current_bet==0) es una fracción del bote actual
+    (`params["bet_size"]`, SIEMPRE entre 0.5 y 0.75 — Tarea 2, "media a 3/4
+    de bote"). Al SUBIR una apuesta ya hecha, se usa el mismo patrón
+    incremento+tope que la resubida preflop (ver _size_preflop_raise) en
+    vez de una fracción del bote, que en la práctica siempre da un número
+    mayor que el propio bote (medido: mediana 1.32x, nunca dentro de
+    ninguna banda razonable) y compone sin límite si hay más de una
+    resubida en la misma calle — la causa medida de la mayoría de los
+    all-in "sin motivo" con stack profundo.
+    """
     if "raise" not in legal:
         return ("all_in", None)
     min_to, max_to = legal["raise"]["min_to"], legal["raise"]["max_to"]
     params = PROFILE_PARAMS[profile]
-    target = hand.current_bet + hand.pot_total() * params["bet_size"]
+    bet_size = params["bet_size"]
+
+    if hand.current_bet <= 0:
+        target = hand.pot_total() * bet_size
+    else:
+        target = hand.current_bet + hand.min_raise * POSTFLOP_REBET_MULT
+        pot_cap = hand.current_bet + hand.pot_total() * POSTFLOP_REBET_POT_CAP
+        target = min(target, pot_cap)
+
+    if rng is not None:
+        target *= 1 + rng.uniform(-PREFLOP_SIZE_JITTER, PREFLOP_SIZE_JITTER)
+
+    # Con stack profundo, ninguna apuesta/resubida "de libro" se come más
+    # del 60% del stack restante (ver _cap_to_stack_fraction) — el tope
+    # DEFINITIVO contra el all-in "sin motivo".
+    target = _cap_to_stack_fraction(target, hand, hand.players[seat])
+
     target = _round_and_clamp(target, min_to, max_to)
     if target >= max_to:
         return ("all_in", None)
@@ -293,9 +442,13 @@ def _preflop_decision_no_range(hand, seat, profile, rng) -> tuple:
     if adjusted + jitter >= raise_min:
         return _size_preflop_raise(hand, seat, legal, profile, rng)
 
-    # Defensa por pot odds (ver docstring arriba).
+    # Defensa por pot odds (ver docstring arriba), penalizada si ya hay
+    # varios rivales activos en la mano (multiway: hace falta mano mejor).
     pot_before = hand.pot_total()
     required = pot_odds(to_call, pot_before)["required_equity_pct"] / 100.0
+    active_rivals = sum(1 for p in hand.players.values() if p.status != PlayerStatus.FOLDED) - 1
+    extra_rivals = max(0, active_rivals - 1)
+    required += extra_rivals * MULTIWAY_TIGHTEN_PER_RIVAL
     equity_est = _preflop_equity_estimate(adjusted) + jitter
     if equity_est + params["call_margin"] >= required:
         return ("call", None)
@@ -349,6 +502,27 @@ def _hero_equity(hand, seat, iters, rng) -> float:
     return result["equity_pct"] / 100.0
 
 
+# Umbral de "ya es una guerra de resubidas" (Tarea 2, "NO all-ins random
+# con stack profundo"): fracción del stack EFECTIVO que hand.current_bet ya
+# representa. Por debajo, cada bot limita su PROPIA subida al 60% de su
+# stack (_cap_to_stack_fraction) — pero si VARIOS bots siguen resubiendo,
+# el mínimo legal de resubida (que crece con cada nivel, ver
+# poker_table.py::_apply_raise_like) acaba forzando el all-in de todas
+# formas por pura mecánica de las reglas, aunque cada tope individual sea
+# razonable. MEDIDO: con 3+ niveles de resubida en la misma calle, el 62%
+# de los all-in resultantes tenían más de 40BB de stack efectivo — casi
+# siempre en el flop, por equity postflop ruidosa (pocas iteraciones Monte
+# Carlo) empujando a varios bots a la vez por encima de value_thresh.
+#
+# Por eso, a partir de este umbral, un bot deja de seguir "subiendo de
+# libro" solo por estar por encima de value_thresh — corta la escalada
+# pasando a pagar (sigue disputando el bote, no foldea una mano buena). Con
+# una mano REALMENTE premium (STACK_WAR_SHOVE_EQUITY) sigue subiendo/yendo
+# a por todas: esa sí es la "resubida grande justificada" que permite la tarea.
+STACK_WAR_COMMITTED_FRACTION = 0.45
+STACK_WAR_SHOVE_EQUITY = 0.75
+
+
 def _postflop_decision(hand, seat, profile, iters, rng) -> tuple:
     params = PROFILE_PARAMS[profile]
     player = hand.players[seat]
@@ -356,21 +530,25 @@ def _postflop_decision(hand, seat, profile, iters, rng) -> tuple:
     to_call = hand.current_bet - player.street_bet
     equity = _hero_equity(hand, seat, iters, rng)
 
+    effective_stack = player.street_bet + player.stack
+    already_a_war = effective_stack > 0 and hand.current_bet >= effective_stack * STACK_WAR_COMMITTED_FRACTION
+    may_keep_raising = (not already_a_war) or equity >= STACK_WAR_SHOVE_EQUITY
+
     if to_call <= 0:
         if equity >= params["value_thresh"] or rng.random() < params["bluff_freq"]:
-            return _size_postflop_bet(hand, seat, legal, profile)
+            return _size_postflop_bet(hand, seat, legal, profile, rng)
         return ("check", None)
 
-    if equity >= params["value_thresh"] and "raise" in legal:
-        return _size_postflop_bet(hand, seat, legal, profile)
+    if equity >= params["value_thresh"] and "raise" in legal and may_keep_raising:
+        return _size_postflop_bet(hand, seat, legal, profile, rng)
 
     pot_before = hand.pot_total()
     required = pot_odds(to_call, pot_before)["required_equity_pct"] / 100.0
     if equity + params["call_margin"] >= required:
         return ("call", None)
 
-    if rng.random() < params["bluff_freq"] * 0.5 and "raise" in legal:
-        return _size_postflop_bet(hand, seat, legal, profile)
+    if rng.random() < params["bluff_freq"] * 0.5 and "raise" in legal and may_keep_raising:
+        return _size_postflop_bet(hand, seat, legal, profile, rng)
 
     return ("fold", None)
 
