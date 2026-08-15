@@ -151,7 +151,7 @@ export function useTableSession(storageKey) {
         let result = hand.result;
         if (data.finished && data.winners_by_pot) {
           const resolvedPlayers = data.players.map((p) => ({ ...p, name: resolveNameRef.current(p.seat) }));
-          const groups = groupPotResults(data.winners_by_pot);
+          const groups = groupPotResults(data.winners_by_pot, resolvedPlayers);
           result = { groups, lines: groups.map((g) => formatPotGroupText(g, resolvedPlayers)) };
         }
         return { ...hand, board, result, finished: !!data.finished };

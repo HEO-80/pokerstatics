@@ -1,14 +1,16 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Swords, RotateCw, LogOut, ListOrdered, Skull, TrendingUp, Trophy, Users } from "lucide-react";
+import { Swords, RotateCw, LogOut, ListOrdered, Skull, Trophy } from "lucide-react";
 import HandTable from "@/components/HandTable";
 import ActivityLog from "@/components/ActivityLog";
 import SessionSummary from "@/components/SessionSummary";
 import TournamentRankingPanel from "@/components/TournamentRankingPanel";
+import TournamentStatsBar from "@/components/TournamentStatsBar";
 import { createTableHand, simulateMttRound } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { usePointsProgress } from "@/hooks/usePointsProgress";
+import { useNavBarStats } from "@/hooks/useNavBarStats";
 import { TOURNAMENT } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
 import { pickRandomNames } from "@/lib/playerNames";
@@ -407,45 +409,68 @@ export default function Tournament() {
       }
     : view;
 
-  const ROUND_PHASE_LABEL = { early: "Fase inicial", mid: "Mitad de torneo", bubble: "Burbuja", final_table: "Mesa final" };
-  const ROUND_PHASE_COLOR = { early: "#3B82F6", mid: "#F59E0B", bubble: "#EF4444", final_table: "#8B5CF6" };
+  // "Sube en N manos" (misma cuenta que Sit&Go, ver useNavBarStats en
+  // SitAndGo.jsx): manos que faltan para que el nivel actual complete una
+  // vuelta del botón en la mesa DEL HERO (`view.players.length` — el tamaño
+  // de esa mesa, no el campo entero del torneo), igual que ya usa
+  // advanceLevelTracker para decidir cuándo sube el nivel de verdad.
+  const tableSize = view?.players.length ?? TOTAL_SEATS;
+  const handsUntilLevelUp = Math.max(1, tableSize - levelInfo.handsAtLevel);
+  const subeEnManos = `${handsUntilLevelUp} mano${handsUntilLevelUp === 1 ? "" : "s"}`;
 
+  // Botones de acción en la NavBar (Tarea "colapsar cabecera de Torneo"):
+  // sustituyen a la vieja fila "icono+TORNEO+Clasificación/Salir" — la
+  // pestaña activa de la NavBar ya dice dónde estás, así que solo suben los
+  // 2 botones. Sin `capsule`: los 9 stats de Torneo no caben en la cápsula
+  // de 5 celdas de Sit&Go, así que viven en su propia sub-barra
+  // (TournamentStatsBar, debajo de la NavBar) en vez de aquí.
+  useNavBarStats(
+    phase === "playing" && view
+      ? {
+          actions: [
+            {
+              key: "ranking",
+              icon: ListOrdered,
+              label: "Clasificación",
+              onClick: () => setShowRanking((v) => !v),
+              active: showRanking,
+              variant: "neutral",
+              testId: TOURNAMENT.rankingToggleBtn,
+            },
+            {
+              key: "exit",
+              icon: LogOut,
+              label: "Salir",
+              onClick: () => setPhase("exited"),
+              variant: "danger",
+              testId: TOURNAMENT.exitBtn,
+            },
+          ],
+        }
+      : null,
+  );
+
+  // Cadena de alturas (misma que Sit&Go, ver SitAndGo.jsx): raíz h-full +
+  // flex-col + overflow-hidden; la sub-barra de stats es shrink-0; el único
+  // hijo que crece es flex-1 min-h-0 — la mesa en juego gestiona su propio
+  // scroll interno (HandTable), el resto de fases (lobby/resultado) van en
+  // un contenedor hermano con overflow-y-auto propio.
   return (
-    <div data-testid={TOURNAMENT.screen} className="w-full px-3 sm:px-6 py-3">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] flex items-center justify-center shrink-0">
-            <Swords className="w-3.5 h-3.5 text-white" />
-          </div>
-          <h1 className="font-display font-bold text-sm uppercase tracking-tight text-white">
-            Torneo
-          </h1>
-        </div>
-        {phase === "playing" && view && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              data-testid={TOURNAMENT.rankingToggleBtn}
-              aria-pressed={showRanking}
-              onClick={() => setShowRanking((v) => !v)}
-              className={`px-4 py-2 rounded-lg border text-sm font-display uppercase tracking-wider transition-colors inline-flex items-center gap-2 ${
-                showRanking
-                  ? "bg-[#8B5CF6]/15 border-[#8B5CF6]/50 text-[#8B5CF6]"
-                  : "border-white/12 text-white hover:bg-white/5"
-              }`}
-            >
-              <ListOrdered className="w-4 h-4" /> Clasificación
-            </button>
-            <button
-              data-testid={TOURNAMENT.exitBtn}
-              onClick={() => setPhase("exited")}
-              className="px-4 py-2 rounded-lg border border-white/12 text-white text-sm font-display uppercase tracking-wider hover:bg-white/5 transition-colors inline-flex items-center gap-2"
-            >
-              <LogOut className="w-4 h-4" /> Salir del torneo
-            </button>
-          </div>
-        )}
-      </div>
+    <div data-testid={TOURNAMENT.screen} className="h-full flex flex-col overflow-hidden">
+      {phase === "playing" && view && (
+        <TournamentStatsBar
+          remaining={remaining}
+          totalEntrants={config?.totalEntrants}
+          estimatedPosition={estimatedPosition}
+          heroStack={heroStack}
+          avgStack={avgStack}
+          payoutStructure={payoutStructure}
+          levelInfo={levelInfo}
+          blinds={blindsForLevel(levelInfo.level)}
+          subeEnManos={subeEnManos}
+          roundPhase={roundPhase}
+        />
+      )}
 
       {showRanking && phase === "playing" && view && (
         <TournamentRankingPanel
@@ -457,289 +482,23 @@ export default function Tournament() {
         />
       )}
 
-      {phase === "playing" && view && (
-        <div
-          data-testid={TOURNAMENT.hud}
-          className="glass-panel rounded-xl px-4 py-2.5 mb-2 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs md:text-sm font-mono-poker"
-        >
-          <div data-testid={TOURNAMENT.hudPlayers} className="flex items-center gap-1.5">
-            <Users className="w-3.5 h-3.5 text-[#94A3B8]" />
-            Jugadores: <span className="text-white font-bold">{remaining}</span>
-            <span className="text-[#475569]">/{config?.totalEntrants}</span>
-          </div>
-          <div className="text-[#94A3B8]">
-            Tu stack: <span className="text-white font-bold">{heroStack}</span>
-          </div>
-          <div className="text-[#94A3B8]">
-            Stack medio: <span className="text-white font-bold">{Math.round(avgStack)}</span>
-          </div>
-          <div data-testid={TOURNAMENT.hudPosition} className="text-[#94A3B8]">
-            Posición <span className="text-white font-bold">#{estimatedPosition ?? "—"}</span>
-          </div>
-          {payoutStructure && (
-            <>
-              <div data-testid={TOURNAMENT.hudPrizePool} className="text-[#94A3B8]">
-                Bote: <span className="text-[#F59E0B] font-bold">{payoutStructure.totalPrizePool.toLocaleString("es-ES")}</span>
-              </div>
-              <div data-testid={TOURNAMENT.hudPaidPlaces} className="text-[#94A3B8]">
-                Premios: top <span className="text-white font-bold">{payoutStructure.paidPlaces}</span>
-              </div>
-            </>
-          )}
-          <div
-            className="flex items-center gap-1.5"
-            style={{ color: ROUND_PHASE_COLOR[roundPhase] }}
-          >
-            {ROUND_PHASE_LABEL[roundPhase]}
-          </div>
-          <div className="flex items-center gap-1.5 text-[#475569]">
-            <TrendingUp className="w-3.5 h-3.5" />
-            Nivel <span className="text-white font-bold">{levelInfo.level}</span> · Ciegas{" "}
-            <span className="text-white font-bold">
-              {blindsForLevel(levelInfo.level).sb}/{blindsForLevel(levelInfo.level).bb}
-            </span>
-          </div>
-          {roundPhase === "bubble" && (
-            <div data-testid={TOURNAMENT.bubbleBanner} className="text-[#EF4444] font-bold uppercase tracking-wide text-[10px]">
-              Burbuja
-            </div>
-          )}
-          {roundPhase === "final_table" && (
-            <div data-testid={TOURNAMENT.finalTableBanner} className="text-[#8B5CF6] font-bold uppercase tracking-wide text-[10px]">
-              Mesa final
-            </div>
-          )}
+      {error && (
+        <div className="shrink-0 mx-3 sm:mx-6 mt-3 p-4 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/40 text-[#EF4444] text-sm">
+          {error}
         </div>
       )}
 
       {phase === "playing" && view && payoutStructure && isBubblePlace(payoutStructure, estimatedPosition) && (
         <div
           data-testid={TOURNAMENT.moneyBubbleBanner}
-          className="mb-2 px-4 py-2 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/40 text-[#EF4444] text-sm font-display font-bold uppercase tracking-wide text-center"
+          className="shrink-0 mx-3 sm:mx-6 mt-2 px-4 py-2 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/40 text-[#EF4444] text-sm font-display font-bold uppercase tracking-wide text-center"
         >
           ¡Estás en la burbuja de premios! Puesto {estimatedPosition}, premios desde el {payoutStructure.paidPlaces}.
         </div>
       )}
 
-      {phase === "lobby" && (
-        <form
-          data-testid={TOURNAMENT.lobby}
-          onSubmit={startTournament}
-          className="glass-panel rounded-2xl p-6 grid grid-cols-2 md:grid-cols-4 gap-4 items-end max-w-2xl"
-        >
-          <div className="col-span-2 md:col-span-4 text-xs text-[#94A3B8]">
-            Torneo MTT: te sientas en una mesa real de 9 jugadores; el resto del campo se simula
-            estadísticamente (ver HUD "Posición #N" y el botón "Clasificación" durante la partida). Ciegas
-            iniciales{" "}
-            <span className="text-white font-mono-poker font-bold">
-              {blindsForLevel(lobby.startLevel).sb}/{blindsForLevel(lobby.startLevel).bb}
-            </span>{" "}
-            (Nivel {lobby.startLevel}) — suben solas cada vez que el botón completa una vuelta a la mesa.
-          </div>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">¿Cómo te llamas?</span>
-            <input
-              type="text"
-              data-testid={TOURNAMENT.heroNameInput}
-              placeholder="Hero"
-              maxLength={20}
-              value={lobby.heroName}
-              onChange={(e) => setLobby((l) => ({ ...l, heroName: e.target.value }))}
-              className={fieldClass}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">Participantes</span>
-            <select
-              data-testid={TOURNAMENT.entrantsSelect}
-              value={lobby.totalEntrants}
-              onChange={(e) => setLobby((l) => ({ ...l, totalEntrants: e.target.value }))}
-              className={fieldClass}
-            >
-              {ENTRANTS_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n} jugadores
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">Stack inicial</span>
-            <input
-              type="number"
-              min={1}
-              value={lobby.startingStack}
-              onChange={(e) => {
-                const startingStack = e.target.value;
-                const nextAllowed = allowedStartLevels(Number(startingStack) || 0);
-                const maxLevel = nextAllowed[nextAllowed.length - 1];
-                setLobby((l) => ({ ...l, startingStack, startLevel: Math.min(l.startLevel, maxLevel) }));
-              }}
-              className={fieldClass}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569]">Nivel inicial</span>
-            <select
-              data-testid={TOURNAMENT.startLevelSelect}
-              value={lobby.startLevel}
-              onChange={(e) => setLobby((l) => ({ ...l, startLevel: Number(e.target.value) }))}
-              className={fieldClass}
-            >
-              {lobbyAllowedLevels.map((lvl) => {
-                const blinds = blindsForLevel(lvl);
-                return (
-                  <option key={lvl} value={lvl}>
-                    Nivel {lvl} · Ciegas {blinds.sb}/{blinds.bb}
-                  </option>
-                );
-              })}
-            </select>
-          </label>
-
-          <button
-            type="submit"
-            data-testid={TOURNAMENT.startBtn}
-            disabled={loading}
-            className="col-span-2 md:col-span-4 mt-2 px-6 py-4 rounded-xl bg-white text-black font-display font-bold uppercase tracking-wider hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
-          >
-            <Swords className="w-5 h-5" /> Empezar torneo
-          </button>
-        </form>
-      )}
-
-      {phase === "lobby" && handHistory.length > 0 && (
-        <div className="max-w-2xl mt-4">
-          <div className="text-xs text-[#94A3B8] mb-2">
-            Historial de la última partida (sin terminar) — se borra al empezar un torneo nuevo.
-          </div>
-          <ActivityLog
-            handHistory={handHistory}
-            className="glass-panel rounded-2xl p-3 max-h-64 overflow-y-auto"
-          />
-        </div>
-      )}
-
-      {error && (
-        <div className="mt-4 p-4 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/40 text-[#EF4444] text-sm">
-          {error}
-        </div>
-      )}
-
-      {phase === "playing" && !view && (
-        <div className="mt-10 text-center text-[#94A3B8] font-display uppercase tracking-wider">
-          Repartiendo…
-        </div>
-      )}
-
-      {phase === "eliminated" && (
-        <div
-          data-testid={TOURNAMENT.eliminatedScreen}
-          className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
-        >
-          <Skull className="w-16 h-16 text-[#EF4444] mx-auto mb-4" />
-          <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-            Puesto {finalPosition} de {config?.totalEntrants}
-          </div>
-          {payoutStructure && (
-            <div data-testid={TOURNAMENT.finalPrize} className="mb-2 font-display font-bold uppercase tracking-wide">
-              {finalPositionInMoney ? (
-                <span className="text-[#F59E0B]">Premio: {finalPrize.toLocaleString("es-ES")}</span>
-              ) : (
-                <span className="text-[#475569]">
-                  Sin premio (puesto {finalPosition}, premios hasta el {payoutStructure.paidPlaces})
-                </span>
-              )}
-            </div>
-          )}
-          <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
-          <div className="mb-6 text-left">
-            <SessionSummary
-              coachAdviceLog={coachAdviceLog}
-              handsPlayed={handHistory.length}
-              resultLine={`Puesto ${finalPosition} de ${config?.totalEntrants}`}
-              totalPoints={pointsProgress.totalPoints}
-            />
-          </div>
-          <button
-            data-testid={TOURNAMENT.newTournamentBtn}
-            onClick={backToLobby}
-            className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-          >
-            <RotateCw className="w-4 h-4" /> Empezar otro torneo
-          </button>
-        </div>
-      )}
-
-      {phase === "won" && (
-        <div
-          data-testid={TOURNAMENT.wonScreen}
-          className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto glow-correct"
-        >
-          <Trophy className="w-16 h-16 text-[#F59E0B] mx-auto mb-4" />
-          <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-            ¡Has ganado el torneo!
-          </div>
-          {payoutStructure && (
-            <div data-testid={TOURNAMENT.finalPrize} className="mb-2 font-display font-bold uppercase tracking-wide text-[#F59E0B]">
-              Premio: {winnerPrize.toLocaleString("es-ES")}
-            </div>
-          )}
-          <div className="text-[#94A3B8] mb-6">
-            Te impusiste a los {config?.totalEntrants} inscritos hasta quedarte con todas las fichas.
-          </div>
-          <div className="mb-6 text-left">
-            <SessionSummary
-              coachAdviceLog={coachAdviceLog}
-              handsPlayed={handHistory.length}
-              resultLine={`¡Ganaste el torneo de ${config?.totalEntrants}!`}
-              totalPoints={pointsProgress.totalPoints}
-            />
-          </div>
-          <button
-            data-testid={TOURNAMENT.newTournamentBtn}
-            onClick={backToLobby}
-            className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-          >
-            <RotateCw className="w-4 h-4" /> Empezar otro torneo
-          </button>
-        </div>
-      )}
-
-      {phase === "exited" && (
-        <div
-          data-testid={TOURNAMENT.exitedScreen}
-          className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
-        >
-          <LogOut className="w-16 h-16 text-[#94A3B8] mx-auto mb-4" />
-          <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-            Has salido del torneo
-          </div>
-          <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
-          <div className="mb-6 text-left">
-            <SessionSummary
-              coachAdviceLog={coachAdviceLog}
-              handsPlayed={handHistory.length}
-              resultLine={`Saliste con ${heroStack} fichas · quedaban ${remaining}/${config?.totalEntrants}`}
-              totalPoints={pointsProgress.totalPoints}
-            />
-          </div>
-          <button
-            data-testid={TOURNAMENT.backToLobbyBtn}
-            onClick={backToLobby}
-            className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-          >
-            <RotateCw className="w-4 h-4" /> Volver al lobby
-          </button>
-        </div>
-      )}
-
-      {phase === "playing" && view && (
-        <div className="mt-2">
+      {phase === "playing" && view ? (
+        <div className="flex-1 min-h-0 flex px-3 sm:px-6 py-2">
           <HandTable
             view={displayView}
             roles={roles}
@@ -773,6 +532,219 @@ export default function Tournament() {
               )
             }
           />
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-3">
+          {phase === "lobby" && (
+            <form
+              data-testid={TOURNAMENT.lobby}
+              onSubmit={startTournament}
+              className="glass-panel rounded-2xl p-6 grid grid-cols-2 md:grid-cols-4 gap-4 items-end max-w-2xl"
+            >
+              <div className="col-span-2 md:col-span-4 text-xs text-[#94A3B8]">
+                Torneo MTT: te sientas en una mesa real de 9 jugadores; el resto del campo se simula
+                estadísticamente (ver HUD "Posición #N" y el botón "Clasificación" durante la partida). Ciegas
+                iniciales{" "}
+                <span className="text-white font-mono-poker font-bold">
+                  {blindsForLevel(lobby.startLevel).sb}/{blindsForLevel(lobby.startLevel).bb}
+                </span>{" "}
+                (Nivel {lobby.startLevel}) — suben solas cada vez que el botón completa una vuelta a la mesa.
+              </div>
+
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] uppercase tracking-widest text-[#475569]">¿Cómo te llamas?</span>
+                <input
+                  type="text"
+                  data-testid={TOURNAMENT.heroNameInput}
+                  placeholder="Hero"
+                  maxLength={20}
+                  value={lobby.heroName}
+                  onChange={(e) => setLobby((l) => ({ ...l, heroName: e.target.value }))}
+                  className={fieldClass}
+                />
+              </label>
+
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] uppercase tracking-widest text-[#475569]">Participantes</span>
+                <select
+                  data-testid={TOURNAMENT.entrantsSelect}
+                  value={lobby.totalEntrants}
+                  onChange={(e) => setLobby((l) => ({ ...l, totalEntrants: e.target.value }))}
+                  className={fieldClass}
+                >
+                  {ENTRANTS_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n} jugadores
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] uppercase tracking-widest text-[#475569]">Stack inicial</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={lobby.startingStack}
+                  onChange={(e) => {
+                    const startingStack = e.target.value;
+                    const nextAllowed = allowedStartLevels(Number(startingStack) || 0);
+                    const maxLevel = nextAllowed[nextAllowed.length - 1];
+                    setLobby((l) => ({ ...l, startingStack, startLevel: Math.min(l.startLevel, maxLevel) }));
+                  }}
+                  className={fieldClass}
+                />
+              </label>
+
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[10px] uppercase tracking-widest text-[#475569]">Nivel inicial</span>
+                <select
+                  data-testid={TOURNAMENT.startLevelSelect}
+                  value={lobby.startLevel}
+                  onChange={(e) => setLobby((l) => ({ ...l, startLevel: Number(e.target.value) }))}
+                  className={fieldClass}
+                >
+                  {lobbyAllowedLevels.map((lvl) => {
+                    const blinds = blindsForLevel(lvl);
+                    return (
+                      <option key={lvl} value={lvl}>
+                        Nivel {lvl} · Ciegas {blinds.sb}/{blinds.bb}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+
+              <button
+                type="submit"
+                data-testid={TOURNAMENT.startBtn}
+                disabled={loading}
+                className="col-span-2 md:col-span-4 mt-2 px-6 py-4 rounded-xl bg-white text-black font-display font-bold uppercase tracking-wider hover:bg-white/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+              >
+                <Swords className="w-5 h-5" /> Empezar torneo
+              </button>
+            </form>
+          )}
+
+          {phase === "lobby" && handHistory.length > 0 && (
+            <div className="max-w-2xl mt-4">
+              <div className="text-xs text-[#94A3B8] mb-2">
+                Historial de la última partida (sin terminar) — se borra al empezar un torneo nuevo.
+              </div>
+              <ActivityLog
+                handHistory={handHistory}
+                className="glass-panel rounded-2xl p-3 max-h-64 overflow-y-auto"
+              />
+            </div>
+          )}
+
+          {phase === "playing" && !view && (
+            <div className="mt-10 text-center text-[#94A3B8] font-display uppercase tracking-wider">
+              Repartiendo…
+            </div>
+          )}
+
+          {phase === "eliminated" && (
+            <div
+              data-testid={TOURNAMENT.eliminatedScreen}
+              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
+            >
+              <Skull className="w-16 h-16 text-[#EF4444] mx-auto mb-4" />
+              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                Puesto {finalPosition} de {config?.totalEntrants}
+              </div>
+              {payoutStructure && (
+                <div data-testid={TOURNAMENT.finalPrize} className="mb-2 font-display font-bold uppercase tracking-wide">
+                  {finalPositionInMoney ? (
+                    <span className="text-[#F59E0B]">Premio: {finalPrize.toLocaleString("es-ES")}</span>
+                  ) : (
+                    <span className="text-[#475569]">
+                      Sin premio (puesto {finalPosition}, premios hasta el {payoutStructure.paidPlaces})
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
+              <div className="mb-6 text-left">
+                <SessionSummary
+                  coachAdviceLog={coachAdviceLog}
+                  handsPlayed={handHistory.length}
+                  resultLine={`Puesto ${finalPosition} de ${config?.totalEntrants}`}
+                  totalPoints={pointsProgress.totalPoints}
+                />
+              </div>
+              <button
+                data-testid={TOURNAMENT.newTournamentBtn}
+                onClick={backToLobby}
+                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+              >
+                <RotateCw className="w-4 h-4" /> Empezar otro torneo
+              </button>
+            </div>
+          )}
+
+          {phase === "won" && (
+            <div
+              data-testid={TOURNAMENT.wonScreen}
+              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto glow-correct"
+            >
+              <Trophy className="w-16 h-16 text-[#F59E0B] mx-auto mb-4" />
+              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                ¡Has ganado el torneo!
+              </div>
+              {payoutStructure && (
+                <div data-testid={TOURNAMENT.finalPrize} className="mb-2 font-display font-bold uppercase tracking-wide text-[#F59E0B]">
+                  Premio: {winnerPrize.toLocaleString("es-ES")}
+                </div>
+              )}
+              <div className="text-[#94A3B8] mb-6">
+                Te impusiste a los {config?.totalEntrants} inscritos hasta quedarte con todas las fichas.
+              </div>
+              <div className="mb-6 text-left">
+                <SessionSummary
+                  coachAdviceLog={coachAdviceLog}
+                  handsPlayed={handHistory.length}
+                  resultLine={`¡Ganaste el torneo de ${config?.totalEntrants}!`}
+                  totalPoints={pointsProgress.totalPoints}
+                />
+              </div>
+              <button
+                data-testid={TOURNAMENT.newTournamentBtn}
+                onClick={backToLobby}
+                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+              >
+                <RotateCw className="w-4 h-4" /> Empezar otro torneo
+              </button>
+            </div>
+          )}
+
+          {phase === "exited" && (
+            <div
+              data-testid={TOURNAMENT.exitedScreen}
+              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
+            >
+              <LogOut className="w-16 h-16 text-[#94A3B8] mx-auto mb-4" />
+              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                Has salido del torneo
+              </div>
+              <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
+              <div className="mb-6 text-left">
+                <SessionSummary
+                  coachAdviceLog={coachAdviceLog}
+                  handsPlayed={handHistory.length}
+                  resultLine={`Saliste con ${heroStack} fichas · quedaban ${remaining}/${config?.totalEntrants}`}
+                  totalPoints={pointsProgress.totalPoints}
+                />
+              </div>
+              <button
+                data-testid={TOURNAMENT.backToLobbyBtn}
+                onClick={backToLobby}
+                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+              >
+                <RotateCw className="w-4 h-4" /> Volver al lobby
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

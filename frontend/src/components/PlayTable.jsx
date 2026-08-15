@@ -62,6 +62,19 @@ function parseCard(str) {
   return { rank: str[0], suit: str[1] };
 }
 
+/** Stack en fichas (como siempre) o en ciegas grandes (BB) — toggle de
+ * presentación pura, ver PlayActionBar.jsx (el botón vive ahí) / HandTable.jsx
+ * (el estado). 1 decimal, sin arrastrar ".0" cuando el resultado es entero
+ * (48 BB, no 48.0 BB; 4.5 BB si no lo es). Sin `bigBlind` (mano recién
+ * creada, o modo no soportado) cae a fichas sin más — nunca un NaN/Infinity
+ * en pantalla. */
+function formatStack(stack, stackMode, bigBlind) {
+  if (stackMode !== "bb" || !bigBlind) return stack;
+  const bbValue = Math.round((stack / bigBlind) * 10) / 10;
+  const text = Number.isInteger(bbValue) ? String(bbValue) : bbValue.toFixed(1);
+  return `${text} BB`;
+}
+
 /**
  * "winning" (resaltada), "dimmed" (atenuada) o "normal" (sin efecto, cuando
  * la mano sigue en curso o fue un fold-out sin cartas que comparar).
@@ -134,6 +147,11 @@ export default function PlayTable({
   highlightedCards,
   dealing = false,
   onSkipDeal,
+  // Toggle "fichas / BB" (presentación pura, ver formatStack arriba): sin
+  // bigBlind (o stackMode!=="bb") se muestran fichas, el comportamiento de
+  // siempre.
+  stackMode = "chips",
+  bigBlind,
   // Nº de asientos del anillo fijo del óvalo (por defecto, players.length —
   // el comportamiento de siempre para Práctica/Torneo, donde el asiento del
   // backend YA es estable). Sit&Go pasa un valor fijo (9) y, en cada jugador,
@@ -169,7 +187,7 @@ export default function PlayTable({
         stays position:absolute regardless of class order.
       */}
       <div
-        className="absolute inset-0 rounded-[50%] poker-table-surface border border-white/8 noise-overlay"
+        className="absolute inset-0 rounded-[50%] border-2 border-[#222c3a] shadow-[inset_0_0_60px_rgba(0,0,0,.5)] bg-[radial-gradient(ellipse_at_50%_40%,#1a2433_0%,#141c28_60%,#111823_100%)] noise-overlay"
         style={{ position: "absolute" }}
       >
         <div className="absolute inset-4 rounded-[50%] border border-white/6" />
@@ -297,7 +315,7 @@ export default function PlayTable({
                   <div className="font-display font-bold text-[10px] uppercase tracking-wide text-white truncate max-w-[84px]">
                     {p.name}
                   </div>
-                  <div className="font-mono-poker text-xs text-white">{p.stack}</div>
+                  <div className="font-mono-poker text-xs text-white">{formatStack(p.stack, stackMode, bigBlind)}</div>
                   {isAllIn && (
                     <div className="text-[8px] uppercase tracking-widest text-[#8B5CF6] font-bold">
                       All-in

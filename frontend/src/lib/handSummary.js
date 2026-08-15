@@ -145,6 +145,7 @@ export function summarizeHand(hand, coachAdviceLog) {
     heroCards: hand.heroCards || [],
     board: flattenBoard(hand.board),
     resultLines: hand.result?.lines ?? [],
+    resultGroups: hand.result?.groups ?? [],
     potTotal,
     finished: !!hand.finished,
     heroWon,

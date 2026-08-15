@@ -4,6 +4,7 @@ import PlayTable from "./PlayTable";
 import PlayActionBar from "./PlayActionBar";
 import ActivityLog from "./ActivityLog";
 import TurnTimer from "./TurnTimer";
+import CardRow from "./CardGlyphRow";
 import CoachPanel, { villainStyleText, readingText, recommendationLabel } from "./CoachPanel";
 import AiCoachPanel from "./AiCoachPanel";
 import { PLAY, POINTS } from "@/constants/testIds";
@@ -58,7 +59,7 @@ const TOGGLE_PALETTE = {
 };
 
 function toggleClass(isActive, color) {
-  return `px-2.5 py-1.5 rounded-lg border text-[11px] font-display font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 ${
+  return `h-7 px-2 rounded-lg border text-[10px] font-display font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1 ${
     isActive ? TOGGLE_PALETTE[color].on : TOGGLE_PALETTE[color].off
   }`;
 }
@@ -90,9 +91,9 @@ function buildCoachSpokenText(entry) {
  *
  * Cadena de alturas (Tarea "layout sin scroll" §2): este componente vive
  * dentro de un contenedor `flex-1 min-h-0` del caller (SitAndGo.jsx) — su
- * raíz es igualmente `flex-1 min-h-0` y CADA nivel hijo es `shrink-0` (fila
- * de controles, fila de stats, zona inferior) o `flex-1 min-h-0` (la fila de
- * la mesa) — nunca una altura fija en px. Antes la fila de la mesa tenía
+ * raíz es igualmente `flex-1 min-h-0` y CADA nivel hijo es `shrink-0` (barra
+ * de controles, zona inferior) o `flex-1 min-h-0` (la fila de la mesa) —
+ * nunca una altura fija en px. Antes la fila de la mesa tenía
  * `style={{ height: "440px" }}`: eso es justo lo que impedía que la mesa
  * absorbiera el espacio real disponible y lo que producía el desborde
  * vertical de página — ver PASO 0 de la tarea.
@@ -144,11 +145,18 @@ export default function HandTable({
   // se abre/cierra sin afectar al otro.
   const [aiOpen, setAiOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(true);
+  // Toggle "fichas / BB" de los stacks de la mesa (ver PlayTable.jsx —
+  // formatStack): vive aquí, no en PlayActionBar.jsx (donde está el botón)
+  // ni en PlayTable.jsx (donde se usa), porque HandTable es el padre común
+  // de ambos y permanece montado toda la sesión — así la preferencia
+  // "dura la partida" sin necesitar localStorage (a diferencia de
+  // `helpOpen`, esto no hace falta que sobreviva a un refresco de página).
+  const [stackMode, setStackMode] = useState("chips");
 
   useEffect(() => {
     saveHelpOpen(helpOpen);
   }, [helpOpen]);
-  const potGroups = view.finished ? groupPotResults(view.winners_by_pot) : [];
+  const potGroups = view.finished ? groupPotResults(view.winners_by_pot, view.players) : [];
   const highlightedCards = view.finished ? collectHighlightedCards(view.winners_by_pot) : null;
 
   // Coach IA (v2): antes vivía dentro de CoachPanel (columna izquierda,
@@ -262,9 +270,8 @@ export default function HandTable({
           {helpOpen && (
             <div
               data-testid={PLAY.helpPanel}
-              className="absolute inset-0 glass-panel rounded-xl p-3 flex flex-col overflow-hidden"
+              className="absolute inset-0 bg-[#10141b] border-r border-[#1e2530] shadow-[10px_0_30px_rgba(0,0,0,.5)] rounded-xl p-3 flex flex-col overflow-hidden"
             >
-              <div className="shrink-0 text-[10px] uppercase tracking-widest text-[#475569] mb-2">Ayuda</div>
               <div className="flex-1 min-h-0">
                 <CoachPanel
                   active={helpOpen && heroTurnActive}
@@ -304,42 +311,46 @@ export default function HandTable({
       )}
 
       <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-2.5">
-        {/* Barra de control (segunda barra, bajo la navegación principal):
-            los 3 toggles de panel, independientes entre sí. */}
-        <div className="shrink-0 hidden lg:flex items-center gap-2">
-          <button
-            type="button"
-            data-testid={PLAY.helpToggleBtn}
-            aria-pressed={helpOpen}
-            onClick={() => setHelpOpen((v) => !v)}
-            className={toggleClass(helpOpen, "white")}
-          >
-            <HelpCircle className="w-3.5 h-3.5" /> Ayuda
-          </button>
-          <button
-            type="button"
-            data-testid={PLAY.coachAiToggleBtn}
-            aria-pressed={aiOpen}
-            onClick={() => setAiOpen((v) => !v)}
-            className={toggleClass(aiOpen, "purple")}
-          >
-            <Sparkles className="w-3.5 h-3.5" /> Coach IA
-          </button>
-          <button
-            type="button"
-            data-testid={PLAY.activityToggleBtn}
-            aria-pressed={activityOpen}
-            onClick={() => setActivityOpen((v) => !v)}
-            className={toggleClass(activityOpen, "blue")}
-          >
-            <History className="w-3.5 h-3.5" /> Actividad
-          </button>
-        </div>
+        {/* Barra de control (sub-barra bajo la NavBar principal, fundida en
+            UNA fila — antes eran dos: toggles arriba, stats/estado/sonido
+            debajo, el doble de alto para el mismo contenido): toggles a la
+            izquierda, puntos+estado centrados, sonido/voz a la derecha.
+            Fondo/borde propios (#0d1118 / #171d26, sin sombra) para que se
+            lea como sub-barra de la mesa, distinta de la NavBar. */}
+        <div className="shrink-0 hidden lg:flex items-center gap-3 px-2.5 py-1.5 bg-[#0d1118] border-b border-[#171d26]">
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              data-testid={PLAY.helpToggleBtn}
+              aria-pressed={helpOpen}
+              onClick={() => setHelpOpen((v) => !v)}
+              className={toggleClass(helpOpen, "white")}
+            >
+              <HelpCircle className="w-3 h-3" /> Ayuda
+            </button>
+            <button
+              type="button"
+              data-testid={PLAY.coachAiToggleBtn}
+              aria-pressed={aiOpen}
+              onClick={() => setAiOpen((v) => !v)}
+              className={toggleClass(aiOpen, "purple")}
+            >
+              <Sparkles className="w-3 h-3" /> Coach IA
+            </button>
+            <button
+              type="button"
+              data-testid={PLAY.activityToggleBtn}
+              aria-pressed={activityOpen}
+              onClick={() => setActivityOpen((v) => !v)}
+              className={toggleClass(activityOpen, "blue")}
+            >
+              <History className="w-3 h-3" /> Actividad
+            </button>
+          </div>
 
-        <div className="shrink-0 flex items-center gap-2 text-xs md:text-sm text-[#94A3B8] font-mono-poker">
-          <div className="flex-1 flex items-center">
+          <div className="flex-1 min-w-0 flex items-center justify-center gap-3 text-xs text-[#94A3B8] font-mono-poker">
             {pointsProgress && (
-              <div data-testid={POINTS.hudBadge} className="flex items-center gap-2.5">
+              <div data-testid={POINTS.hudBadge} className="flex items-center gap-2.5 shrink-0">
                 <span className="flex items-center gap-1 text-[#F59E0B] font-bold" title="Nivel (por calidad de decisión)">
                   <Star className="w-3.5 h-3.5" /> Nv {levelForPoints(pointsProgress.totalPoints)}
                 </span>
@@ -351,22 +362,23 @@ export default function HandTable({
                 )}
               </div>
             )}
+            <div className="flex items-center gap-2 shrink-0">
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  view.finished ? "bg-[#475569]" : view.is_hero_turn ? "bg-[#10B981] animate-pulse" : "bg-[#F59E0B]"
+                }`}
+              />
+              {view.finished ? "Mano terminada" : view.is_hero_turn ? "Tu turno" : "Los bots están decidiendo…"}
+              <span className="text-[#475569]">· Calle: {view.street}</span>
+              {view.sb != null && view.bb != null && (
+                <span data-testid={PLAY.blinds} className="text-[#475569]">
+                  · Ciegas {view.sb}/{view.bb}
+                </span>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                view.finished ? "bg-[#475569]" : view.is_hero_turn ? "bg-[#10B981] animate-pulse" : "bg-[#F59E0B]"
-              }`}
-            />
-            {view.finished ? "Mano terminada" : view.is_hero_turn ? "Tu turno" : "Los bots están decidiendo…"}
-            <span className="text-[#475569]">· Calle: {view.street}</span>
-            {view.sb != null && view.bb != null && (
-              <span data-testid={PLAY.blinds} className="text-[#475569]">
-                · Ciegas {view.sb}/{view.bb}
-              </span>
-            )}
-          </div>
-          <div className="flex-1 flex items-center justify-end gap-2">
+
+          <div className="flex items-center gap-2 shrink-0">
             {voiceSupported && (
               <button
                 type="button"
@@ -411,6 +423,8 @@ export default function HandTable({
               dealing={dealing}
               onSkipDeal={onSkipDeal}
               totalSeats={totalSeats}
+              stackMode={stackMode}
+              bigBlind={view.bb}
             />
           </div>
 
@@ -418,7 +432,7 @@ export default function HandTable({
             <ActivityLog
               handHistory={handHistory}
               testId={PLAY.botLog}
-              className="hidden lg:flex lg:flex-col w-[290px] shrink-0 glass-panel rounded-2xl p-3 overflow-y-auto"
+              className="hidden lg:flex lg:flex-col w-[290px] shrink-0 bg-[#0f131a] border-l border-[#1e2530] shadow-[-14px_0_34px_rgba(0,0,0,.55)] rounded-2xl p-3 overflow-y-auto"
             />
           )}
         </div>
@@ -428,11 +442,23 @@ export default function HandTable({
             <div data-testid={PLAY.resultBanner} className="glass-panel rounded-xl p-4 text-center">
               <div className="flex flex-col items-center gap-1.5 mb-3">
                 {potGroups.map((group, i) => (
-                  <div key={i} className="flex items-center justify-center gap-2">
-                    <Trophy className="w-4 h-4 text-[#F59E0B] shrink-0" />
-                    <span className="font-display font-bold text-sm md:text-base uppercase text-white">
-                      {formatPotGroupText(group, view.players)}
-                    </span>
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <div className="flex items-center justify-center gap-2">
+                      <Trophy className="w-4 h-4 text-[#F59E0B] shrink-0" />
+                      <span className="font-display font-bold text-sm md:text-base uppercase text-white">
+                        {formatPotGroupText(group, view.players)}
+                      </span>
+                    </div>
+                    {group.winnerHands && group.winnerHands.length > 0 && (
+                      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5 text-xs">
+                        {group.winnerHands.map((w) => (
+                          <span key={w.seat} className="text-[#94A3B8]">
+                            {group.winnerHands.length > 1 ? `${w.name}: ` : ""}
+                            <CardRow cards={w.cards} />
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -449,6 +475,8 @@ export default function HandTable({
                 currentBet={view.current_bet}
                 onAction={onAction}
                 disabled={loading || !view.is_hero_turn}
+                stackMode={stackMode}
+                onToggleStackMode={() => setStackMode((m) => (m === "bb" ? "chips" : "bb"))}
               />
             </div>
           )}

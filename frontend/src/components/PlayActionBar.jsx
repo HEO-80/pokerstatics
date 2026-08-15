@@ -17,7 +17,21 @@ const QUICK_SIZES = [
  * rápidos de tamaño (min / ⅓ / ½ / bote — pote calculado como
  * currentBet + fracción × (pot + call), la fórmula estándar de "pot bet").
  */
-export default function PlayActionBar({ legalActions, potTotal = 0, currentBet = 0, onAction, disabled }) {
+export default function PlayActionBar({
+  legalActions,
+  potTotal = 0,
+  currentBet = 0,
+  onAction,
+  disabled,
+  // Toggle "fichas / BB" para los stacks de la mesa (ver PlayTable.jsx —
+  // formatStack): el BOTÓN vive aquí (barra de "Raise amount"), pero el
+  // ESTADO vive en HandTable.jsx (el padre común de este componente y de
+  // PlayTable, así sobrevive entre manos mientras dura la sesión). Ambas
+  // props son opcionales: sin ellas el botón simplemente no se pinta (no
+  // debería pasar en Práctica/Torneo/Sit&Go, que siempre las pasan).
+  stackMode,
+  onToggleStackMode,
+}) {
   const raiseInfo = legalActions?.raise;
   const [raiseAmount, setRaiseAmount] = useState(raiseInfo?.min_to ?? 0);
   const [inputValue, setInputValue] = useState(String(raiseInfo?.min_to ?? 0));
@@ -122,9 +136,27 @@ export default function PlayActionBar({ legalActions, potTotal = 0, currentBet =
       {legalActions.raise && (
         <div className="glass-panel rounded-xl p-2.5 space-y-1.5">
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <span className="text-[10px] uppercase tracking-widest text-[#475569] shrink-0">
-              Raise amount
-            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[10px] uppercase tracking-widest text-[#475569]">
+                Raise amount
+              </span>
+              {onToggleStackMode && (
+                <button
+                  type="button"
+                  data-testid={PLAY.stackModeToggleBtn}
+                  aria-pressed={stackMode === "bb"}
+                  title="Cambiar cómo se muestran los stacks de la mesa (fichas / ciegas BB)"
+                  onClick={onToggleStackMode}
+                  className={`px-1.5 py-0.5 rounded-md border text-[9px] uppercase tracking-wide transition-colors ${
+                    stackMode === "bb"
+                      ? "bg-[#3B82F6]/15 border-[#3B82F6]/50 text-[#3B82F6]"
+                      : "border-white/12 text-[#94A3B8] hover:text-white hover:border-white/30"
+                  }`}
+                >
+                  Ver en {stackMode === "bb" ? "fichas" : "BB"}
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-1.5 flex-wrap justify-end">
               <button
                 type="button"

@@ -239,16 +239,19 @@ export default function SitAndGo() {
   useNavBarStats(
     phase === "playing" && view
       ? {
-          mesa: "SIT&GO",
-          jugadores: `${survivorsLeft}/${TOTAL_SEATS}`,
-          stack: heroStack,
-          nivel: levelInfo.level,
-          nivelHint: `Sube en ${Math.max(1, survivorsLeft - levelInfo.handsAtLevel)} mano${
-            Math.max(1, survivorsLeft - levelInfo.handsAtLevel) === 1 ? "" : "s"
-          }`,
-          ciegas: `${blindsForLevel(levelInfo.level).sb}/${blindsForLevel(levelInfo.level).bb}`,
-          onExit: () => setPhase("exited"),
-          exitTestId: SITANDGO.exitBtn,
+          capsule: {
+            mesa: "SIT&GO",
+            jugadores: `${survivorsLeft}/${TOTAL_SEATS}`,
+            stack: heroStack,
+            nivel: levelInfo.level,
+            nivelHint: `Sube en ${Math.max(1, survivorsLeft - levelInfo.handsAtLevel)} mano${
+              Math.max(1, survivorsLeft - levelInfo.handsAtLevel) === 1 ? "" : "s"
+            }`,
+            ciegas: `${blindsForLevel(levelInfo.level).sb}/${blindsForLevel(levelInfo.level).bb}`,
+          },
+          actions: [
+            { key: "exit", icon: LogOut, label: "Salir", onClick: () => setPhase("exited"), testId: SITANDGO.exitBtn },
+          ],
         }
       : null,
   );

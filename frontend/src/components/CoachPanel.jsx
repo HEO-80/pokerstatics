@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Trophy } from "lucide-react";
-import { cardGlyph } from "@/lib/cardGlyphs";
 import { summarizePlayer } from "@/lib/villainStats";
 import { summarizeHand } from "@/lib/handSummary";
 import { PLAY } from "@/constants/testIds";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
+import BaseCardRow from "./CardGlyphRow";
+
+function CardText({ cards }) {
+  return <BaseCardRow cards={cards} gap="gap-1" />;
+}
 
 // Colores de la recomendación final: los manda el backend (poker_coach.py,
 // derive_recommendation) como "red"/"blue"/"green" — aquí solo se traducen a
@@ -157,8 +161,13 @@ export default function CoachPanel({ active, coachAdviceLog, handHistory }) {
 
   if (count === 0) {
     return (
-      <div className="h-full flex items-center text-sm text-[#475569] leading-snug">
-        {active ? "Calculando el primer análisis…" : "Todavía no hay consejos en esta partida — juega tu primera mano."}
+      <div className="h-full flex flex-col gap-2.5">
+        <div className="shrink-0 rounded-lg border border-[#252d3a] bg-[#161b24] shadow-[0_2px_6px_rgba(0,0,0,.35)] px-3 py-2">
+          <div className="text-[10px] uppercase tracking-widest text-[#6b7686]">Ayuda</div>
+        </div>
+        <div className="flex-1 flex items-center text-sm text-[#475569] leading-snug">
+          {active ? "Calculando el primer análisis…" : "Todavía no hay consejos en esta partida — juega tu primera mano."}
+        </div>
       </div>
     );
   }
@@ -173,35 +182,38 @@ export default function CoachPanel({ active, coachAdviceLog, handHistory }) {
 
   return (
     <div className="h-full flex flex-col gap-2.5 text-sm leading-relaxed">
-      <div className="shrink-0 flex items-center justify-between gap-2 text-xs">
-        <button
-          type="button"
-          data-testid={PLAY.coachPrevBtn}
-          onClick={goPrev}
-          disabled={viewIndex <= 0}
-          className="p-1 rounded-md text-[#94A3B8] hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
-          title="Consejo anterior"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-        <div className="flex items-center gap-2 font-mono-poker text-[#475569]">
-          <span data-testid={PLAY.coachCounter}>
-            Consejo {viewIndex + 1} de {count}
-          </span>
-          <span className={`px-1.5 py-0.5 rounded uppercase tracking-widest text-[9px] font-bold ${badgeClass}`}>
-            {badgeText}
-          </span>
+      <div className="shrink-0 rounded-lg border border-[#252d3a] bg-[#161b24] shadow-[0_2px_6px_rgba(0,0,0,.35)] px-3 py-2 flex flex-col gap-1.5">
+        <div className="text-[10px] uppercase tracking-widest text-[#6b7686]">Ayuda</div>
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <button
+            type="button"
+            data-testid={PLAY.coachPrevBtn}
+            onClick={goPrev}
+            disabled={viewIndex <= 0}
+            className="p-1 rounded-md bg-[#1a1f29] border border-[#2b3441] text-[#94A3B8] hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:hover:bg-[#1a1f29]"
+            title="Consejo anterior"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <div className="flex items-center gap-2 font-mono-poker text-[#475569]">
+            <span data-testid={PLAY.coachCounter}>
+              Consejo {viewIndex + 1} de {count}
+            </span>
+            <span className={`px-1.5 py-0.5 rounded uppercase tracking-widest text-[9px] font-bold ${badgeClass}`}>
+              {badgeText}
+            </span>
+          </div>
+          <button
+            type="button"
+            data-testid={PLAY.coachNextBtn}
+            onClick={goNext}
+            disabled={isLive}
+            className="p-1 rounded-md bg-[#1a1f29] border border-[#2b3441] text-[#94A3B8] hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:hover:bg-[#1a1f29]"
+            title="Consejo siguiente"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
-        <button
-          type="button"
-          data-testid={PLAY.coachNextBtn}
-          onClick={goNext}
-          disabled={isLive}
-          className="p-1 rounded-md text-[#94A3B8] hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
-          title="Consejo siguiente"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
       </div>
 
       {slide?.type === "advice" && (
@@ -213,22 +225,6 @@ export default function CoachPanel({ active, coachAdviceLog, handHistory }) {
         </div>
       )}
     </div>
-  );
-}
-
-function CardText({ cards }) {
-  return (
-    <span className="inline-flex gap-1">
-      {cards.map((c, i) => {
-        const { rank, symbol, color } = cardGlyph(c);
-        return (
-          <span key={i} className="font-mono-poker font-bold" style={{ color }}>
-            {rank}
-            {symbol}
-          </span>
-        );
-      })}
-    </span>
   );
 }
 
@@ -321,7 +317,7 @@ function outcomeText(entry) {
  * hay pot odds si no hay nada que pagar). */
 function NumberTile({ label, value, colorClass }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1.5 flex flex-col items-center text-center gap-0.5">
+    <div className="rounded-lg border border-[#252d3a] bg-[#161b24] shadow-[0_2px_6px_rgba(0,0,0,.35)] px-2 py-1.5 flex flex-col items-center text-center gap-0.5">
       <div className="text-[9px] uppercase tracking-widest text-[#475569]">{label}</div>
       <div className={`font-mono-poker font-bold text-sm ${colorClass}`}>{value}</div>
     </div>
@@ -402,7 +398,7 @@ function CoachAdviceEntryView({ entry, handHistory }) {
       )}
 
       {hasPotOdds && eq ? (
-        <div className="shrink-0">
+        <div className="shrink-0 rounded-lg border border-[#252d3a] bg-[#161b24] shadow-[0_2px_6px_rgba(0,0,0,.35)] p-2">
           <EquityBar requiredPct={required} equityPct={eq.equity_pct} />
         </div>
       ) : (
@@ -421,9 +417,9 @@ function CoachAdviceEntryView({ entry, handHistory }) {
           defecto (POR QUÉ abierto) en vez de arrastrar el estado de la
           diapositiva anterior. */}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <Accordion type="multiple" defaultValue={["why"]} className="text-xs">
-          <AccordionItem value="why" className="border-white/8">
-            <AccordionTrigger className="py-2 text-[11px] uppercase tracking-widest text-[#94A3B8] hover:no-underline hover:text-white">
+        <Accordion type="multiple" defaultValue={["why"]} className="text-xs space-y-2">
+          <AccordionItem value="why" className="border-b-0">
+            <AccordionTrigger className="px-3 py-2 rounded-lg border border-[#252d3a] bg-[#161b24] shadow-[0_2px_6px_rgba(0,0,0,.35)] text-[11px] uppercase tracking-widest text-[#94A3B8] hover:no-underline hover:text-white">
               Por qué
             </AccordionTrigger>
             <AccordionContent className="pt-0 pb-3 space-y-2 text-[#94A3B8]">
@@ -447,8 +443,8 @@ function CoachAdviceEntryView({ entry, handHistory }) {
           </AccordionItem>
 
           {eq && (
-            <AccordionItem value="villain" className="border-white/8">
-              <AccordionTrigger className="py-2 text-[11px] uppercase tracking-widest text-[#94A3B8] hover:no-underline hover:text-white">
+            <AccordionItem value="villain" className="border-b-0">
+              <AccordionTrigger className="px-3 py-2 rounded-lg border border-[#252d3a] bg-[#161b24] shadow-[0_2px_6px_rgba(0,0,0,.35)] text-[11px] uppercase tracking-widest text-[#94A3B8] hover:no-underline hover:text-white">
                 Lectura del rival
               </AccordionTrigger>
               <AccordionContent className="pt-0 pb-3 space-y-1.5 text-[#94A3B8]">
@@ -469,8 +465,8 @@ function CoachAdviceEntryView({ entry, handHistory }) {
           )}
 
           {entry.breakeven && (
-            <AccordionItem value="raise" className="border-white/8 border-b-0">
-              <AccordionTrigger className="py-2 text-[11px] uppercase tracking-widest text-[#94A3B8] hover:no-underline hover:text-white">
+            <AccordionItem value="raise" className="border-b-0">
+              <AccordionTrigger className="px-3 py-2 rounded-lg border border-[#252d3a] bg-[#161b24] shadow-[0_2px_6px_rgba(0,0,0,.35)] text-[11px] uppercase tracking-widest text-[#94A3B8] hover:no-underline hover:text-white">
                 Si subes a {entry.breakeven.raise_to}
               </AccordionTrigger>
               <AccordionContent className="pt-0 pb-3 text-[#94A3B8]">
@@ -518,11 +514,26 @@ function HandSummaryView({ hand, coachAdviceLog }) {
 
       {summary.resultLines.length > 0 && (
         <div className="space-y-1">
-          {summary.resultLines.map((line, i) => (
-            <div key={i} className="flex items-center gap-1.5 text-[#F59E0B] font-bold">
-              <Trophy className="w-3.5 h-3.5 shrink-0" /> {line}
-            </div>
-          ))}
+          {summary.resultLines.map((line, i) => {
+            const winnerHands = summary.resultGroups[i]?.winnerHands;
+            return (
+              <div key={i}>
+                <div className="flex items-center gap-1.5 text-[#F59E0B] font-bold">
+                  <Trophy className="w-3.5 h-3.5 shrink-0" /> {line}
+                </div>
+                {winnerHands && winnerHands.length > 0 && (
+                  <div className="pl-5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs font-normal">
+                    {winnerHands.map((w) => (
+                      <span key={w.seat} className="text-[#94A3B8]">
+                        {winnerHands.length > 1 ? `${w.name}: ` : ""}
+                        <CardText cards={w.cards} />
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

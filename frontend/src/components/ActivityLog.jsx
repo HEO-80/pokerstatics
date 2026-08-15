@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef } from "react";
 import { Trophy } from "lucide-react";
 import { seatName } from "@/lib/table";
 import { STREET_ORDER } from "@/lib/handHistory";
-import { cardGlyph } from "@/lib/cardGlyphs";
+import CardRow from "./CardGlyphRow";
 
 /**
  * `entry.raiseNumber` (adjuntado en handAnimation.js/useTableSession.js al
@@ -49,26 +49,6 @@ const ACTION_LOG_COLOR = {
   all_in: "text-[#F59E0B]",
 };
 
-/** Cartas en línea con su símbolo de palo (y color rojo/gris claro para que
- * los cuatro palos se lean sobre el fondo oscuro, ver lib/cardGlyphs.js),
- * usado tanto para "Tus cartas" como para los reveals de board dentro de una
- * mano del historial de Actividad. */
-function CardRow({ cards }) {
-  return (
-    <span className="inline-flex gap-1.5">
-      {cards.map((c, i) => {
-        const { rank, symbol, color } = cardGlyph(c);
-        return (
-          <span key={i} className="font-mono-poker font-bold" style={{ color }}>
-            {rank}
-            {symbol}
-          </span>
-        );
-      })}
-    </span>
-  );
-}
-
 function positionsLine(hand) {
   const { dealer, smallBlind, bigBlind } = hand.positions;
   const dealerIsSb = dealer.seat === smallBlind.seat;
@@ -92,7 +72,7 @@ function handHeaderText(hand) {
  */
 function HandHistoryBlock({ hand }) {
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 rounded-lg border border-[#252d3a] bg-[#161b24] shadow-[0_2px_6px_rgba(0,0,0,.35)] p-2">
       <div className="text-[10px] font-mono-poker text-[#475569] tracking-wide whitespace-nowrap">
         {handHeaderText(hand)}
       </div>
@@ -130,11 +110,25 @@ function HandHistoryBlock({ hand }) {
           </Fragment>
         );
       })}
-      {hand.result?.lines.map((line, i) => (
-        <div key={i} className="text-xs font-bold text-[#F59E0B] flex items-center gap-1">
-          <Trophy className="w-3 h-3 shrink-0" /> {line}
-        </div>
-      ))}
+      {hand.result?.lines.map((line, i) => {
+        const winnerHands = hand.result.groups?.[i]?.winnerHands;
+        return (
+          <div key={i} className="text-xs leading-snug">
+            <div className="font-bold text-[#F59E0B] flex items-center gap-1">
+              <Trophy className="w-3 h-3 shrink-0" /> {line}
+            </div>
+            {winnerHands && winnerHands.length > 0 && (
+              <div className="pl-4 flex flex-wrap gap-x-3 gap-y-0.5">
+                {winnerHands.map((w) => (
+                  <span key={w.seat} className="text-[#94A3B8]">
+                    {w.name}: <CardRow cards={w.cards} />
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

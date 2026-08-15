@@ -80,6 +80,7 @@ export const PLAY = {
   coachAiCloseBtn: "play-coach-ai-close-btn",
   voiceToggleBtn: "play-voice-toggle-btn",
   coachAiStopSpeakingBtn: "play-coach-ai-stop-speaking-btn",
+  stackModeToggleBtn: "play-stack-mode-toggle-btn",
 };
 
 export const TOURNAMENT = {

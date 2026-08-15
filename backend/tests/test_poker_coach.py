@@ -20,9 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import poker_bot
 import poker_coach
 import poker_table_api
-from poker_engine import make_card, pot_odds
+from poker_engine import breakeven_bluff, make_card, pot_odds
 from poker_table import Hand, PlayerState, deck_with_known_cards
 from poker_table_api import table_router
 
@@ -598,3 +599,280 @@ def test_bb_defense_heads_up_cheap_price_stays_a_call_despite_oop():
     assert rec["accion_sugerida"] == "call", (
         f"R no debe apretar tanto que rompa una defensa barata OOP heads-up: {rec}"
     )
+
+
+# =============================================================================
+# TAREA — "La fuerza manda primero": con una mano FUERTE preflop (top 10%
+# por fuerza de Chen, ver poker_coach.STRONG_HAND_CODES) la recomendación es
+# SIEMPRE raise/re-raise para aislar — nunca fold, y R (factor de
+# realización) ni se calcula para esas manos. Además, en un bote SIN ABRIR
+# (preflop, current_bet<=bb — el hero solo enfrenta la ciega grande o un
+# limp, ninguna subida real) R tampoco se aplica a NINGUNA mano: R responde
+# a "¿realizo mi equity si PAGO una subida?" y aquí no hay ninguna subida
+# real que pagar.
+#
+# Bug que motivó esto: con AK (equity cruda ~66%) en un bote sin abrir y
+# varios rivales por actuar detrás, la recomendación era FOLD — R penalizaba
+# una mano premium por "rivales detrás", cuando la respuesta correcta con
+# una mano fuerte es SUBIR para aislarte, no foldear.
+# =============================================================================
+def _legal_and_breakeven(hand: Hand, hero_seat: int) -> tuple[dict, dict]:
+    """Construye `breakeven` exactamente como build_coach_response() —
+    standard_raise_to() + breakeven_bluff() sobre el bote real — para que
+    los tests ejerciten el mismo camino que la app en vivo, no un breakeven
+    inventado a mano."""
+    legal = hand.legal_actions(hero_seat)
+    hero = hand.players[hero_seat]
+    pot_before = hand.pot_total()
+    raise_to = poker_coach.standard_raise_to(hand, legal)
+    breakeven = None
+    if raise_to is not None:
+        bet_amount = raise_to - hero.street_bet
+        breakeven = {"raise_to": raise_to, "bet_amount": bet_amount, **breakeven_bluff(bet_amount, pot_before)}
+    return legal, breakeven
+
+
+def test_ak_unopened_multiway_recommends_raise_never_fold():
+    """7 jugadores, botón=0 -> UTG (asiento 3) es el primero en actuar, con
+    los OTROS 6 asientos todavía por decidir detrás (hand.to_act tiene 7
+    entradas) — el bote sigue sin abrir (current_bet == bb, nadie ha
+    subido). El hero (UTG) recibe A-K. Aunque haya 6 rivales por detrás
+    (justo lo que antes tumbaba la recomendación vía R), con AK la
+    respuesta debe ser RAISE (abrir para aislar), nunca fold."""
+    prefix = [
+        make_card("2", "c"),  # seat1 carta 1 (relleno)
+        make_card("3", "c"),  # seat2 carta 1 (relleno)
+        make_card("A", "s"),  # seat3 (hero, UTG) carta 1
+        make_card("2", "h"),  # seat4 carta 1 (relleno)
+        make_card("3", "d"),  # seat5 carta 1 (relleno)
+        make_card("3", "h"),  # seat6 carta 1 (relleno)
+        make_card("4", "h"),  # seat0 (BTN) carta 1 (relleno)
+        make_card("4", "c"),  # seat1 carta 2 (relleno)
+        make_card("4", "d"),  # seat2 carta 2 (relleno)
+        make_card("K", "d"),  # seat3 (hero, UTG) carta 2
+        make_card("5", "h"),  # seat4 carta 2 (relleno)
+        make_card("5", "c"),  # seat5 carta 2 (relleno)
+        make_card("5", "d"),  # seat6 carta 2 (relleno)
+        make_card("6", "h"),  # seat0 (BTN) carta 2 (relleno)
+    ]
+    deck = deck_with_known_cards(prefix)
+    players = [PlayerState(seat=s, name=f"P{s}", stack=1000.0) for s in range(7)]
+    hand = Hand(players=players, button_seat=0, sb=1, bb=2, deck=deck)
+
+    hero_seat = 3
+    assert hand.current_seat == hero_seat  # UTG es el primero en actuar (7 jugadores)
+    assert hand.players[hero_seat].hole_cards == [make_card("A", "s"), make_card("K", "d")]
+    assert len(hand.to_act) == 7 and len(hand.to_act) - 1 == 6  # 6 rivales por decidir detrás
+
+    to_call = hand.current_bet - hand.players[hero_seat].street_bet
+    assert to_call == 2  # completar la ciega grande, ninguna subida real
+    assert hand.current_bet <= hand.bb  # "sin abrir" tal cual lo detecta derive_recommendation
+
+    po = pot_odds(to_call, hand.pot_total())
+    villain_seat = poker_coach.pick_villain_seat(hand, hero_seat)
+    active_villain_seats = [
+        s for s, p in hand.players.items() if s != hero_seat and p.status.value != "folded"
+    ]
+    legal, breakeven = _legal_and_breakeven(hand, hero_seat)
+    assert breakeven is not None
+
+    equity = {"equity_pct": 66.0}  # equity cruda ~66%, la del bug reportado
+    rec = poker_coach.derive_recommendation(
+        hand, hero_seat, to_call, po, equity, breakeven, villain_seat, active_villain_seats,
+    )
+    assert rec["accion_sugerida"] == "raise"
+    assert rec["accion_sugerida"] != "fold"
+    assert rec["color"] == "green"
+    assert rec["raise_to"] == breakeven["raise_to"]
+    # Guardarraíl de tamaño: el estándar (2/3 de bote), NUNCA all-in por defecto.
+    assert rec["raise_to"] < legal["raise"]["max_to"]
+    assert "aislar" in rec["explicacion"].lower()
+    assert "6 rivales" in rec["explicacion"]
+
+
+def test_strong_pair_facing_a_limp_recommends_raise():
+    """4 jugadores, botón=0 -> UTG (asiento 3) limpea (paga la ciega grande
+    sin subir) -> le toca al hero (asiento 0, el BOTÓN) con QQ, enfrentando
+    ese limp: current_bet sigue en la ciega grande (nadie ha subido de
+    verdad) -> "sin abrir" + to_call>0 (el bug #2 exacto: bote sin abrir
+    con algo que pagar). Con un par fuerte la respuesta es subir sobre el
+    limper para aislarte, no pagar ni foldear."""
+    prefix = [
+        make_card("2", "c"),  # seat1 carta 1 (relleno)
+        make_card("3", "c"),  # seat2 carta 1 (relleno)
+        make_card("4", "c"),  # seat3 (UTG, limpea) carta 1 (relleno)
+        make_card("Q", "s"),  # seat0 (hero, BTN) carta 1
+        make_card("2", "d"),  # seat1 carta 2 (relleno)
+        make_card("3", "d"),  # seat2 carta 2 (relleno)
+        make_card("4", "d"),  # seat3 (UTG, limpea) carta 2 (relleno)
+        make_card("Q", "h"),  # seat0 (hero, BTN) carta 2 -> QQ
+    ]
+    deck = deck_with_known_cards(prefix)
+    players = [PlayerState(seat=s, name=f"P{s}", stack=1000.0) for s in range(4)]
+    hand = Hand(players=players, button_seat=0, sb=1, bb=2, deck=deck)
+
+    assert hand.current_seat == 3  # UTG actúa primero (4 jugadores)
+    hand.apply_action(3, "call")  # UTG limpea: paga la bb, no sube
+
+    hero_seat = 0
+    assert hand.current_seat == hero_seat  # le toca al botón justo después del limp
+    assert hand.players[hero_seat].hole_cards == [make_card("Q", "s"), make_card("Q", "h")]
+
+    to_call = hand.current_bet - hand.players[hero_seat].street_bet
+    assert to_call == 2  # nada pagado todavía por el hero esta calle
+    assert hand.current_bet <= hand.bb  # sin abrir: el limp no sube la apuesta
+
+    po = pot_odds(to_call, hand.pot_total())
+    villain_seat = poker_coach.pick_villain_seat(hand, hero_seat)
+    active_villain_seats = [
+        s for s, p in hand.players.items() if s != hero_seat and p.status.value != "folded"
+    ]
+    legal, breakeven = _legal_and_breakeven(hand, hero_seat)
+    assert breakeven is not None
+
+    equity = {"equity_pct": 80.0}
+    rec = poker_coach.derive_recommendation(
+        hand, hero_seat, to_call, po, equity, breakeven, villain_seat, active_villain_seats,
+    )
+    assert rec["accion_sugerida"] == "raise"
+    assert rec["accion_sugerida"] != "fold"
+    assert rec["raise_to"] == breakeven["raise_to"]
+    assert rec["raise_to"] < legal["raise"]["max_to"]
+
+
+# =============================================================================
+# TAREA — "Recomendación consciente del stack": el PASO 0 de fuerza (tarea
+# anterior) hacía que un par medio (99/88/77...) SIEMPRE resubiera al
+# enfrentar una subida real — demasiado agresivo, mete en botes hinchados
+# contra un rango mejor. La jugada correcta depende del stack:
+#   - PREMIUM (AA/KK/QQ/AKs/AKo): resube/shove SIEMPRE, da igual el stack.
+#   - Par medio/especulativa (resto del top 10%): >=20bb -> CALL (set-mine);
+#     <5bb -> SHOVE; entre medias (5-20bb) -> lógica normal de pot odds/R,
+#     sin forzar nada.
+#   - RESTO (fuera del top 10%): lógica normal; pero <5bb -> shove en vez de
+#     fold (evitar morir de ciegas). Todo esto es SOLO preflop.
+#
+# `stack_bb` = (street_bet + stack) / bb — heads-up, justo tras postear las
+# ciegas y ANTES de que nadie pierda fichas, esto equivale exactamente al
+# stack INICIAL del PlayerState (las fichas de la ciega se mueven de
+# `stack` a `street_bet`, la suma no cambia) — por eso los builders de abajo
+# simplemente fijan `stack=stack_bb*bb` al crear al hero.
+# =============================================================================
+def _build_heads_up_facing_raise_spot(hero_stack, hero_card_a, hero_card_b, raise_to, bb=10, sb=5):
+    """Heads-up: seat0=botón/SB (abre con `raise_to`), seat1=hero/BB. Deja la
+    mano justo en el turno del hero, con to_call/po/villain/breakeven ya
+    calculados — mismo patrón que `_legal_and_breakeven` de arriba."""
+    filler_rank, filler_suit_a, filler_suit_b = "K", "c", "d"
+    prefix = [
+        make_card(filler_rank, filler_suit_a),  # seat0 (villano) carta 1 (relleno)
+        hero_card_a,                             # seat1 (hero) carta 1
+        make_card(filler_rank, filler_suit_b),  # seat0 (villano) carta 2 (relleno)
+        hero_card_b,                             # seat1 (hero) carta 2
+    ]
+    deck = deck_with_known_cards(prefix)
+    hand = Hand(
+        players=[
+            PlayerState(seat=0, name="Villano", stack=1000.0),
+            PlayerState(seat=1, name="Hero", stack=hero_stack),
+        ],
+        button_seat=0, sb=sb, bb=bb, deck=deck,
+    )
+    assert hand.players[1].hole_cards == [hero_card_a, hero_card_b]
+    assert hand.current_seat == 0  # botón/SB actúa primero preflop heads-up
+    hand.apply_action(0, "raise", to_amount=raise_to)
+    assert hand.current_seat == 1
+
+    hero_seat = 1
+    to_call = hand.current_bet - hand.players[hero_seat].street_bet
+    po = pot_odds(to_call, hand.pot_total())
+    villain_seat = poker_coach.pick_villain_seat(hand, hero_seat)
+    active_villain_seats = [
+        s for s, p in hand.players.items() if s != hero_seat and p.status.value != "folded"
+    ]
+    legal, breakeven = _legal_and_breakeven(hand, hero_seat)
+    assert breakeven is not None
+    return hand, hero_seat, to_call, po, villain_seat, active_villain_seats, legal, breakeven
+
+
+def test_mid_pair_facing_raise_deep_stack_calls_does_not_reraise():
+    """99 (par medio, top 10% pero fuera de PREMIUM_HAND_CODES) enfrentando
+    una subida real con stack PROFUNDO (30bb) -> CALL forzado (set-mine),
+    NUNCA resube — justo el bug que motivó la tarea."""
+    hand, hero_seat, to_call, po, villain_seat, active_villain_seats, legal, breakeven = (
+        _build_heads_up_facing_raise_spot(hero_stack=300.0, hero_card_a=make_card("9", "d"),
+                                           hero_card_b=make_card("9", "h"), raise_to=25)
+    )
+    stack_bb = (hand.players[hero_seat].street_bet + hand.players[hero_seat].stack) / hand.bb
+    assert stack_bb == 30.0
+
+    equity = {"equity_pct": 55.0}
+    rec = poker_coach.derive_recommendation(
+        hand, hero_seat, to_call, po, equity, breakeven, villain_seat, active_villain_seats,
+    )
+    assert rec["accion_sugerida"] == "call"
+    assert rec["raise_to"] is None
+
+
+def test_mid_pair_facing_raise_short_stack_shoves():
+    """El mismo 99, pero con stack CORTO (3bb) -> ya no da para set-mine ->
+    SHOVE (all-in), ni call pasivo ni fold."""
+    hand, hero_seat, to_call, po, villain_seat, active_villain_seats, legal, breakeven = (
+        _build_heads_up_facing_raise_spot(hero_stack=30.0, hero_card_a=make_card("9", "d"),
+                                           hero_card_b=make_card("9", "h"), raise_to=20)
+    )
+    stack_bb = (hand.players[hero_seat].street_bet + hand.players[hero_seat].stack) / hand.bb
+    assert stack_bb == 3.0
+
+    equity = {"equity_pct": 45.0}
+    rec = poker_coach.derive_recommendation(
+        hand, hero_seat, to_call, po, equity, breakeven, villain_seat, active_villain_seats,
+    )
+    assert rec["accion_sugerida"] == "raise"
+    assert rec["raise_to"] == hand.players[hero_seat].street_bet + hand.players[hero_seat].stack
+    assert "all-in" in rec["explicacion"].lower()
+
+
+def test_marginal_hand_short_stack_shoves_instead_of_folding():
+    """Mano marginal (fuera del top 10%, 7-2 offsuit) enfrentando una subida
+    real con stack MUY corto (3bb) y equity floja (foldearía en condiciones
+    normales) -> SHOVE en vez de fold: con tan pocas ciegas, foldear te come
+    el stack poco a poco."""
+    hand, hero_seat, to_call, po, villain_seat, active_villain_seats, legal, breakeven = (
+        _build_heads_up_facing_raise_spot(hero_stack=30.0, hero_card_a=make_card("7", "c"),
+                                           hero_card_b=make_card("2", "d"), raise_to=20)
+    )
+    stack_bb = (hand.players[hero_seat].street_bet + hand.players[hero_seat].stack) / hand.bb
+    assert stack_bb == 3.0
+    assert poker_bot.hole_cards_to_code(hand.players[hero_seat].hole_cards) not in poker_coach.STRONG_HAND_CODES
+
+    # eq_pct=15 está muy por debajo de lo que pide el bote aquí (~25%) ->
+    # en lógica normal (sin el ajuste de stack) esto sería fold claro.
+    equity = {"equity_pct": 15.0}
+    rec = poker_coach.derive_recommendation(
+        hand, hero_seat, to_call, po, equity, breakeven, villain_seat, active_villain_seats,
+    )
+    assert rec["accion_sugerida"] == "raise"
+    assert rec["accion_sugerida"] != "fold"
+    assert rec["raise_to"] == hand.players[hero_seat].street_bet + hand.players[hero_seat].stack
+    assert "all-in" in rec["explicacion"].lower()
+
+
+def test_mid_pair_facing_raise_medium_stack_uses_normal_logic_no_forced_shove():
+    """El mismo 99 con stack NI profundo NI muy corto (12bb, entre 5 y 20)
+    -> no se fuerza nada (ni call, ni shove): cae a la lógica normal de pot
+    odds + R, que con equity floja debe seguir pudiendo decir fold."""
+    hand, hero_seat, to_call, po, villain_seat, active_villain_seats, legal, breakeven = (
+        _build_heads_up_facing_raise_spot(hero_stack=120.0, hero_card_a=make_card("9", "d"),
+                                           hero_card_b=make_card("9", "h"), raise_to=30)
+    )
+    stack_bb = (hand.players[hero_seat].street_bet + hand.players[hero_seat].stack) / hand.bb
+    assert stack_bb == 12.0
+
+    # eq_pct=15 está muy por debajo de lo que pide el bote aquí (~33%),
+    # incluso sin aplicar R -> debe seguir siendo fold (nada de shove
+    # forzado ni call forzado en esta banda de stack).
+    equity = {"equity_pct": 15.0}
+    rec = poker_coach.derive_recommendation(
+        hand, hero_seat, to_call, po, equity, breakeven, villain_seat, active_villain_seats,
+    )
+    assert rec["accion_sugerida"] == "fold"

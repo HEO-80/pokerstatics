@@ -20,7 +20,7 @@ import random
 from dataclasses import dataclass, field
 from enum import Enum
 
-from poker_engine import FULL_DECK, best_hand_with_cards, hand_category_name
+from poker_engine import FULL_DECK, best_hand_with_cards, hand_description_es
 
 
 class HandError(Exception):
@@ -455,7 +455,7 @@ class Hand:
                 winners = eligible
                 if show_hands:
                     score, cards = best_hand_with_cards(self.players[eligible[0]].hole_cards + self.board)
-                    hand_name = hand_category_name(score)
+                    hand_name = hand_description_es(score, cards)
                     winning_hands = {eligible[0]: cards}
             else:
                 scored = {
@@ -464,7 +464,7 @@ class Hand:
                 best_score = max(score for score, _ in scored.values())
                 winners = [s for s in eligible if scored[s][0] == best_score]
                 if show_hands:
-                    hand_name = hand_category_name(best_score)
+                    hand_name = hand_description_es(best_score, scored[winners[0]][1])
                     winning_hands = {s: scored[s][1] for s in winners}
 
             share, remainder = divmod(pot["amount"], len(winners))

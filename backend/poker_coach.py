@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import poker_bot
 from poker_engine import RANK_TO_INT, breakeven_bluff, card_str, equity_vs_range, pot_odds
-from poker_table import Hand, PlayerStatus
+from poker_table import Hand, PlayerStatus, Street
 
 # Percentiles (sobre las 169 hand-codes, ordenadas por chen_strength) que
 # aproximan cada nivel de agresión mostrado por el rival — ver docstring del
@@ -299,6 +299,317 @@ def _equity_intro(eq_pct: float, realized_pct: float, realization: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Fuerza de mano (FUERTE) — MANDA PRIMERO, por delante de pot odds y de R.
+#
+# BUG que motivó esto (visto jugando): en un bote SIN ABRIR (nadie ha
+# subido, solo están las ciegas) con AK (equity cruda ~66%) y varios rivales
+# por actuar detrás, derive_recommendation() recomendaba FOLD. Dos motivos
+# mezclados:
+#   1. R (factor de realización) se le aplicaba a una mano PREMIUM y la
+#      tumbaba por "muchos rivales detrás" — pero con una mano fuerte la
+#      respuesta a "hay gente detrás" NO es foldear, es SUBIR para aislarte
+#      contra uno solo. R modela el riesgo de PAGAR sin realizar tu equity;
+#      con una mano fuerte no vas a pagar pasivo, vas a tomar la iniciativa,
+#      así que R no tiene nada que decir ahí.
+#   2. R se aplicaba en un bote SIN ABRIR. R responde a "¿realizaré mi
+#      equity si PAGO esta subida?" — no pinta nada cuando no hay ninguna
+#      subida real que pagar (ver más abajo, docstring de `derive_recommendation`
+#      sobre `unopened`).
+#
+# STRONG_HAND_PCT reutiliza EXACTAMENTE la misma maquinaria que ya usa este
+# archivo para el rango del rival tras una subida (RAISE_RANGE_PCT, ver
+# estimate_villain_range): _CHEN_SORTED_CODES/_top_pct_range ya ordenan las
+# 169 combinaciones por fuerza de Chen — aquí se usa para el hero, no para
+# el rival, con un corte más conservador (10%, no 15%) porque "nunca
+# foldear por R" es una afirmación fuerte: MEDIDO con el propio chen_score,
+# el 10% más fuerte son AA-88, AKs/AKo, AQs/AQo, AJs, KQs/KJs/QJs/JTs/T9s —
+# parejas que se quieren jugar heads-up + manos premium con A/broadway, tal
+# cual pide la tarea. Es un concepto PREFLOP puro (Chen solo mira las cartas
+# de mano, no el board) — por eso derive_recommendation solo entra en este
+# bloque con `hand.street == Street.PREFLOP`: postflop la fuerza real ya la
+# mide mejor `eq_pct` (que sí ve el board), y esa rama no está reportada
+# como rota, así que no se toca.
+STRONG_HAND_PCT = 0.10
+STRONG_HAND_CODES = frozenset(_top_pct_range(STRONG_HAND_PCT))
+
+# PREMIUM (subconjunto de STRONG_HAND_CODES) — Tarea "recomendación consciente
+# del stack": frente a una SUBIDA REAL, un par medio/especulativa (77-JJ,
+# AJs/AQs/AQo, KQs/KJs/QJs/JTs/T9s...) NO debe jugarse igual que AA/KK/QQ/AK —
+# resubir SIEMPRE un par medio mete en botes hinchados contra un rango mejor
+# (el motivo del ajuste). Se necesita distinguir "de verdad premium" del
+# resto del top 10%.
+#
+# NO se deriva por percentil de Chen como STRONG_HAND_CODES: chen_score
+# EMPATA AKo (10) con TT/AJs/KQs, y AKs (12) con JJ — no existe ningún corte
+# por percentil que aísle "QQ+/AK" sin colar JJ/TT o sin dejar fuera AKo
+# (comprobado con el propio chen_score, ver resumen de la tarea). Por eso es
+# un conjunto EXPLÍCITO, no un `_top_pct_range(...)` — mismo patrón que
+# `poker_bot._CHEN_HIGH_CARD_OVERRIDES` (dict pequeño y literal para un caso
+# que la fórmula de Chen no resuelve bien).
+PREMIUM_HAND_CODES = frozenset({"AA", "KK", "QQ", "AKs", "AKo"})
+
+# Profundidad de stack: REUTILIZA poker_bot.SHORT_STACK_BB (20 — "la
+# profundidad por debajo de la cual jugar push/fold tiene sentido", ya
+# calibrado y usado por los bots) como frontera profundo/corto — no se
+# inventa un número nuevo para el coach. VERY_SHORT_STACK_BB (5) sí es nuevo
+# (propuesto y confirmado en la tarea): por debajo de esto, hasta una mano
+# marginal cualquiera pasa a jugarse push/fold (foldear aquí = morir de
+# ciegas) — teoría push/fold estándar.
+VERY_SHORT_STACK_BB = 5
+
+
+def _effective_stack_bb(hand: Hand, hero_seat: int) -> float:
+    """Stack efectivo del hero en ciegas grandes — variante con street_bet
+    (no solo `hero.stack`): un jugador que ya ha puesto fichas esta calle
+    (p.ej. la ciega grande) sigue "teniendo" esas fichas a efectos de cuánto
+    puede llegar a jugarse; `hero.stack` solo mediría lo que le queda POR
+    PONER, infravalorando su stack efectivo real en exactamente eso. Mismo
+    cálculo que ya usa poker_bot._cap_to_stack_fraction."""
+    player = hand.players[hero_seat]
+    return (player.street_bet + player.stack) / hand.bb
+
+
+def _shove_raise_to(hand: Hand, hero_seat: int) -> float:
+    """Importe de un shove (all-in): todo lo que el hero tiene puesto +
+    disponible esta calle — el mismo número que legal_actions() calcularía
+    como `raise.max_to` (o `all_in.amount`), sin necesitar volver a llamar a
+    legal_actions() aquí (el caller ya garantiza que "raise" es legal antes
+    de usar esto, ver `breakeven is not None` en derive_recommendation)."""
+    player = hand.players[hero_seat]
+    return player.street_bet + player.stack
+
+
+def _preflop_hand_code(hand: Hand, hero_seat: int) -> str:
+    return poker_bot.hole_cards_to_code(hand.players[hero_seat].hole_cards)
+
+
+def _strong_hand_recommendation(hand: Hand, hero_seat: int, breakeven: dict, context: str, stack_bb: float) -> dict:
+    """Rama "BOTE SIN ABRIR" (current_bet<=bb): CUALQUIER mano del top 10%
+    (premium o par medio/especulativa, sin distinguir — aquí no hay una
+    subida real que resubir, es abrir de cero) -> SIEMPRE raise, nunca fold.
+    `facing_raise` decide si el texto habla de abrir/subir (nadie ha subido
+    todavía) o de resubir sobre un limp — la ACCIÓN es "raise" en ambos
+    casos, solo cambia la palabra.
+
+    Cuantos más rivales queden por decidir DETRÁS del hero esta ronda
+    (`hand.to_act`, mismo campo que ya usa `equity_realization_factor` para
+    R_behind), MÁS motivo para subir — justo lo contrario de cómo R trataba
+    ese mismo número — así que aquí se menciona como razón A FAVOR, no en
+    contra.
+
+    GUARDARRAÍL de tamaño: `raise_to` es `breakeven["raise_to"]` (2/3 de
+    bote estándar) SALVO que `stack_bb < VERY_SHORT_STACK_BB` — con tan
+    pocas ciegas un open "de libro" ya es casi todo el stack, así que se
+    convierte directamente en shove (`_shove_raise_to`) y el texto lo dice
+    explícitamente (nunca un tamaño intermedio ambiguo).
+    """
+    facing_raise = hand.current_bet > hand.bb
+    rivals_behind = max(0, len(hand.to_act) - 1)
+    behind_clause = ""
+    if rivals_behind > 0:
+        behind_clause = (
+            f" Además, {rivals_behind} rival{'es' if rivals_behind != 1 else ''} por decidir detrás "
+            f"tuya esta ronda: cuantos más queden, MÁS motivo para subir (te aísla contra un campo "
+            f"ancho), no menos."
+        )
+
+    if stack_bb < VERY_SHORT_STACK_BB:
+        raise_to = _shove_raise_to(hand, hero_seat)
+        return {
+            "accion_sugerida": "raise",
+            "color": "green",
+            "raise_to": raise_to,
+            "es_marginal": False,
+            "explicacion": (
+                f"Tienes una mano premium (top {int(STRONG_HAND_PCT * 100)}% de manos iniciales) y solo "
+                f"~{stack_bb:.1f}bb de stack -> vete directo ALL-IN (shove), no hay tamaño intermedio "
+                f"que tenga sentido con tan pocas ciegas.{behind_clause} {context}"
+            ),
+            "raise_size_rationale": (
+                f"Shove: vas con todo tu stack ({raise_to} fichas) — con ~{stack_bb:.1f}bb, cualquier "
+                f"apertura 'de libro' ya se come casi todo, mejor ir directo all-in."
+            ),
+        }
+
+    verb = "resubir (3-bet/4-bet)" if facing_raise else "subir/abrir"
+    raise_to = breakeven["raise_to"]
+    return {
+        "accion_sugerida": "raise",
+        "color": "green",
+        "raise_to": raise_to,
+        "es_marginal": False,
+        "explicacion": (
+            f"Tienes una mano premium (top {int(STRONG_HAND_PCT * 100)}% de manos iniciales) -> lo "
+            f"estándar es {verb} para aislarte contra un solo rival, no jugarla pasiva."
+            f"{behind_clause} {context} Nota: de vez en cuando, flatear (pagar sin subir) para "
+            f"disfrazar una mano así también es una línea válida — pero no es la recomendación por "
+            f"defecto aquí."
+        ),
+        "raise_size_rationale": _raise_size_rationale(hand, raise_to),
+    }
+
+
+def _premium_vs_raise_recommendation(hand: Hand, hero_seat: int, breakeven: dict, context: str, stack_bb: float) -> dict:
+    """PREMIUM (`PREMIUM_HAND_CODES`) enfrentando una SUBIDA REAL: resube/
+    shove SIEMPRE, da igual el stack — el corte "profundo/corto"
+    (`poker_bot.SHORT_STACK_BB`, 20bb) solo decide el TAMAÑO (resubida
+    estándar vs shove directo), nunca decide si se juega o no (nunca fold,
+    nunca solo pagar)."""
+    if stack_bb < poker_bot.SHORT_STACK_BB:
+        raise_to = _shove_raise_to(hand, hero_seat)
+        return {
+            "accion_sugerida": "raise",
+            "color": "green",
+            "raise_to": raise_to,
+            "es_marginal": False,
+            "explicacion": (
+                f"Mano SUPER premium (AA/KK/QQ/AK) enfrentando una subida real, con stack corto "
+                f"(~{stack_bb:.1f}bb) -> vete ALL-IN (shove), no te quedes solo pagando ni resubas a un "
+                f"tamaño intermedio: con tan pocas ciegas, resubir 'de libro' ya te compromete casi "
+                f"entero. {context}"
+            ),
+            "raise_size_rationale": (
+                f"Shove: vas con todo tu stack ({raise_to} fichas) — con ~{stack_bb:.1f}bb no hay "
+                f"resubida intermedia que tenga sentido."
+            ),
+        }
+
+    raise_to = breakeven["raise_to"]
+    return {
+        "accion_sugerida": "raise",
+        "color": "green",
+        "raise_to": raise_to,
+        "es_marginal": False,
+        "explicacion": (
+            f"Mano premium (AA/KK/QQ/AK) enfrentando una subida real -> resubir (3-bet/4-bet) es lo "
+            f"estándar, da igual cuántos rivales queden detrás: no es momento de esconderla pagando. "
+            f"{context}"
+        ),
+        "raise_size_rationale": _raise_size_rationale(hand, raise_to),
+    }
+
+
+def _mid_pair_call_recommendation(hand: Hand, hero_seat: int, context: str) -> dict:
+    """Par medio/especulativa fuerte (resto de STRONG_HAND_CODES, sin
+    contar PREMIUM_HAND_CODES) enfrentando una subida real CON STACK
+    PROFUNDO (>=SHORT_STACK_BB): CALL forzado (set-mine), ni fold ni
+    resubida — resubir cada vez mete en botes hinchados contra un rango
+    mejor (el bug que motivó esta tarea), y foldear regala una mano con
+    equity real. No pasa por pot odds/R en absoluto: la jugada estándar con
+    stack profundo no depende de esos números, depende del stack."""
+    return {
+        "accion_sugerida": "call",
+        "color": "blue",
+        "raise_to": None,
+        "es_marginal": False,
+        "explicacion": (
+            "Tienes un par medio o especulativa fuerte (tipo 77-JJ) enfrentando una subida real, con "
+            "stack profundo -> pagar para buscar trío (set-mine) es la jugada estándar; resubir cada "
+            "vez te mete en botes hinchados contra un rango mejor, y foldear regala equity real que sí "
+            f"tienes. {context}"
+        ),
+    }
+
+
+def _short_stack_shove_recommendation(hand: Hand, hero_seat: int, breakeven: dict, context: str, reason: str) -> dict:
+    """Shove genérico reutilizado por dos casos distintos (par medio con
+    stack corto, y RESTO/marginal con stack MUY corto) — ambos comparten el
+    mismo formato: raise al máximo con el texto dejando claro que es un
+    ALL-IN/shove, nunca solo "sube a X"."""
+    raise_to = _shove_raise_to(hand, hero_seat)
+    return {
+        "accion_sugerida": "raise",
+        "color": "green",
+        "raise_to": raise_to,
+        "es_marginal": False,
+        "explicacion": f"{reason} {context}",
+        "raise_size_rationale": (
+            f"Shove: vas con todo tu stack ({raise_to} fichas) — con las ciegas tan bajas no hay tamaño "
+            f"intermedio que tenga sentido."
+        ),
+    }
+
+
+def _pot_odds_recommendation(
+    hand: Hand, hero_seat: int, eq_pct: float, margin: float, required: float, equity_intro: str,
+    breakeven: dict | None, context: str, shove_if_would_fold: bool = False, stack_bb: float | None = None,
+) -> dict:
+    """Los 4 desenlaces de siempre (fold/marginal/raise-de-valor/call) sobre
+    `margin` YA calculado por el caller — factorizado para que la rama SIN
+    ABRIR (margin = eq_pct crudo - required, sin R) y la rama que enfrenta
+    una subida real (margin = equity_realizada - required, con R) compartan
+    exactamente los mismos umbrales sin duplicar las 4 ramas.
+
+    `shove_if_would_fold` (Tarea "recomendación consciente del stack",
+    RESTO fuera de STRONG_HAND_CODES con stack MUY corto, <5bb, enfrentando
+    una subida real preflop — ver derive_recommendation): en vez de foldear,
+    se juega el ALL-IN — foldear con tan pocas ciegas te come el stack por
+    puro desgaste de ciegas/antes, así que hasta una mano marginal decente
+    sale más rentable jugándosela. Solo se activa si además `breakeven` no
+    es None (si "raise" no es legal ahora mismo, no hay shove que ofrecer y
+    se cae al fold de siempre)."""
+    if margin <= FOLD_MARGIN_PCT:
+        if shove_if_would_fold and breakeven is not None:
+            return _short_stack_shove_recommendation(
+                hand, hero_seat, breakeven, context,
+                (
+                    f"Tu equity no llega a lo que pide el bote, pero con solo ~{stack_bb:.1f}bb de stack "
+                    f"foldear aquí te deja morir de ciegas poco a poco -> mejor jugarte el ALL-IN (shove) "
+                    f"que regalar el stack sin pelear."
+                ),
+            )
+        return {
+            "accion_sugerida": "fold",
+            "color": "red",
+            "raise_to": None,
+            "es_marginal": False,
+            "explicacion": (
+                f"{equity_intro} no llega al {required}% que pide el bote -> pagar "
+                f"aquí pinta -EV, lo razonable es fold. {context}"
+            ),
+        }
+
+    if abs(margin) <= MARGINAL_BAND_PCT:
+        raise_hint = f", o raise a {breakeven['raise_to']} para presionar" if breakeven else ""
+        return {
+            "accion_sugerida": "call",
+            "color": "blue",
+            "raise_to": breakeven["raise_to"] if breakeven else None,
+            "es_marginal": True,
+            "explicacion": (
+                f"{equity_intro} está muy cerca del {required}% que pide el bote -> "
+                f"decisión marginal: call para controlar el bote{raise_hint}, ambas líneas son "
+                f"defendibles aquí, ninguna es un error grande. {context}"
+            ),
+        }
+
+    if margin >= RAISE_MARGIN_PCT and eq_pct >= RAISE_MIN_EQUITY_PCT and breakeven is not None:
+        return {
+            "accion_sugerida": "raise",
+            "color": "green",
+            "raise_to": breakeven["raise_to"],
+            "es_marginal": False,
+            "explicacion": (
+                f"{equity_intro} supera el {required}% que pide el bote con margen "
+                f"amplio y tu mano tiene ventaja clara sobre el rango del rival -> raise de valor a "
+                f"{breakeven['raise_to']}. {context}"
+            ),
+            "raise_size_rationale": _raise_size_rationale(hand, breakeven["raise_to"]),
+        }
+
+    return {
+        "accion_sugerida": "call",
+        "color": "blue",
+        "raise_to": None,
+        "es_marginal": False,
+        "explicacion": (
+            f"{equity_intro} supera el {required}% que pide el bote -> pagar es "
+            f"rentable, pero sin ventaja tan clara como para inflar el bote -> call. {context}"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Recomendación final (v1, PLANTILLA — nada de IA): traduce los números YA
 # calculados arriba (equity estimada vs required_equity_pct de pot_odds, y el
 # breakeven de una subida estándar) en fold/call/raise + color, con una
@@ -368,19 +679,70 @@ def derive_recommendation(
     """Ver los umbrales documentados arriba. Devuelve None si no hay equity
     estimada (sin ella no hay número con el que fundamentar nada).
 
-    `villain_seat`/`active_villain_seats` (Tarea "factor de realización R"):
-    solo se usan en la rama to_call>0 — pagar una subida no es un all-in,
-    así que ahí se compara equity_realizada = equity_cruda * R contra pot
-    odds, no la equity cruda a secas (ver equity_realization_factor arriba).
-    La rama to_call<=0 (abrir una apuesta propia) sigue con la equity cruda
-    tal cual: ahí no hay pot odds que pagar, es una decisión distinta
-    (apostar por valor o no) fuera del alcance de este ajuste."""
+    Orden de la lógica (Tarea "la fuerza manda primero" + "recomendación
+    consciente del stack"):
+      0. Mano del top 10% preflop (`STRONG_HAND_CODES`) -> el stack decide,
+         NUNCA se foldea por culpa de R:
+         a) BOTE SIN ABRIR (current_bet<=bb): raise siempre (abre/sube),
+            shove si stack_bb<VERY_SHORT_STACK_BB — ver
+            `_strong_hand_recommendation`. Sin distinguir premium/par medio
+            aquí: no hay ninguna subida real que resubir, es abrir de cero.
+         b) Enfrentando una SUBIDA REAL (current_bet>bb):
+            - PREMIUM (`PREMIUM_HAND_CODES`, AA/KK/QQ/AKs/AKo): resube
+              siempre, shove si stack_bb<SHORT_STACK_BB — ver
+              `_premium_vs_raise_recommendation`.
+            - Resto del top 10% (par medio/especulativa, ej. 77-JJ):
+              stack_bb>=SHORT_STACK_BB -> CALL forzado (set-mine), ni fold
+              ni resubida (`_mid_pair_call_recommendation`); stack_bb<
+              VERY_SHORT_STACK_BB -> shove; EN MEDIO (5-20bb) NO se fuerza
+              nada -> cae a la lógica normal de pot odds/R de más abajo.
+      1. to_call<=0 (nada que pagar: abrir una apuesta propia o pasar) —
+         sigue con la equity cruda tal cual, sin cambios.
+      2. Bote SIN ABRIR pero con algo que pagar (preflop, `current_bet<=bb`
+         — el hero solo tiene que completar la ciega grande, nadie ha
+         subido de verdad): R NO se aplica aquí (bug reportado) — R
+         modela "¿realizo mi equity si PAGO una subida?", y aquí no hay
+         ninguna subida real que pagar. Se compara la equity CRUDA contra
+         pot odds directamente.
+      3. Cualquier otro to_call>0 (preflop enfrentando una subida real, o
+         cualquier apuesta/subida postflop): R se aplica exactamente igual
+         que antes (`villain_seat`/`active_villain_seats`, ver
+         equity_realization_factor arriba). Además, SOLO preflop y con
+         stack_bb<VERY_SHORT_STACK_BB, una mano que de otro modo foldearía
+         se juega el ALL-IN en su lugar (ver `_pot_odds_recommendation`,
+         `shove_if_would_fold`) — evita morir de ciegas con un stack
+         diminuto. Postflop esto NUNCA se activa.
+    """
     if equity is None:
         return None
 
     eq_pct = equity["equity_pct"]
     hero_stack = hand.players[hero_seat].stack
     context = f"Estás en {_position_word(hand, hero_seat)} con {hero_stack} fichas de stack."
+
+    if breakeven is not None and hand.street == Street.PREFLOP:
+        code = _preflop_hand_code(hand, hero_seat)
+        if code in STRONG_HAND_CODES:
+            stack_bb = _effective_stack_bb(hand, hero_seat)
+            unopened = hand.current_bet <= hand.bb
+            if unopened:
+                return _strong_hand_recommendation(hand, hero_seat, breakeven, context, stack_bb)
+            # Enfrentando una subida real:
+            if code in PREMIUM_HAND_CODES:
+                return _premium_vs_raise_recommendation(hand, hero_seat, breakeven, context, stack_bb)
+            if stack_bb >= poker_bot.SHORT_STACK_BB:
+                return _mid_pair_call_recommendation(hand, hero_seat, context)
+            if stack_bb < VERY_SHORT_STACK_BB:
+                return _short_stack_shove_recommendation(
+                    hand, hero_seat, breakeven, context,
+                    (
+                        f"Tienes un par medio o especulativa fuerte enfrentando una subida real, pero "
+                        f"con stack corto (~{stack_bb:.1f}bb) ya no da para jugar a buscar trío -> ALL-IN "
+                        f"(shove) en vez de pagar pasivo."
+                    ),
+                )
+            # 5 <= stack_bb < SHORT_STACK_BB (20): sin forzar nada, cae a la
+            # lógica normal de pot odds + R de más abajo.
 
     if to_call <= 0:
         if eq_pct >= RAISE_MIN_EQUITY_PCT and breakeven is not None:
@@ -406,6 +768,12 @@ def derive_recommendation(
             ),
         }
 
+    if hand.street == Street.PREFLOP and hand.current_bet <= hand.bb:
+        required = po["required_equity_pct"]
+        margin = eq_pct - required
+        equity_intro = f"Tu equity estimada (~{eq_pct}%)"
+        return _pot_odds_recommendation(hand, hero_seat, eq_pct, margin, required, equity_intro, breakeven, context)
+
     realization = equity_realization_factor(hand, hero_seat, villain_seat, active_villain_seats or [])
     realized_pct = round(eq_pct * realization["r"], 2)
     equity_intro = _equity_intro(eq_pct, realized_pct, realization)
@@ -413,56 +781,16 @@ def derive_recommendation(
     required = po["required_equity_pct"]
     margin = realized_pct - required
 
-    if margin <= FOLD_MARGIN_PCT:
-        return {
-            "accion_sugerida": "fold",
-            "color": "red",
-            "raise_to": None,
-            "es_marginal": False,
-            "explicacion": (
-                f"{equity_intro} no llega al {required}% que pide el bote -> pagar "
-                f"aquí pinta -EV, lo razonable es fold. {context}"
-            ),
-        }
+    shove_if_would_fold = False
+    stack_bb = None
+    if hand.street == Street.PREFLOP:
+        stack_bb = _effective_stack_bb(hand, hero_seat)
+        shove_if_would_fold = stack_bb < VERY_SHORT_STACK_BB
 
-    if abs(margin) <= MARGINAL_BAND_PCT:
-        raise_hint = f", o raise a {breakeven['raise_to']} para presionar" if breakeven else ""
-        return {
-            "accion_sugerida": "call",
-            "color": "blue",
-            "raise_to": breakeven["raise_to"] if breakeven else None,
-            "es_marginal": True,
-            "explicacion": (
-                f"{equity_intro} está muy cerca del {required}% que pide el bote -> "
-                f"decisión marginal: call para controlar el bote{raise_hint}, ambas líneas son "
-                f"defendibles aquí, ninguna es un error grande. {context}"
-            ),
-        }
-
-    if margin >= RAISE_MARGIN_PCT and eq_pct >= RAISE_MIN_EQUITY_PCT and breakeven is not None:
-        return {
-            "accion_sugerida": "raise",
-            "color": "green",
-            "raise_to": breakeven["raise_to"],
-            "es_marginal": False,
-            "explicacion": (
-                f"{equity_intro} supera el {required}% que pide el bote con margen "
-                f"amplio y tu mano tiene ventaja clara sobre el rango del rival -> raise de valor a "
-                f"{breakeven['raise_to']}. {context}"
-            ),
-            "raise_size_rationale": _raise_size_rationale(hand, breakeven["raise_to"]),
-        }
-
-    return {
-        "accion_sugerida": "call",
-        "color": "blue",
-        "raise_to": None,
-        "es_marginal": False,
-        "explicacion": (
-            f"{equity_intro} supera el {required}% que pide el bote -> pagar es "
-            f"rentable, pero sin ventaja tan clara como para inflar el bote -> call. {context}"
-        ),
-    }
+    return _pot_odds_recommendation(
+        hand, hero_seat, eq_pct, margin, required, equity_intro, breakeven, context,
+        shove_if_would_fold=shove_if_would_fold, stack_bb=stack_bb,
+    )
 
 
 def standard_raise_to(hand: Hand, legal: dict) -> float | None:

@@ -29,7 +29,7 @@ function App() {
     // reintroducir el scroll de página que tenía antes; el resto de páginas
     // (Home/Stats/Admin/...) siguen scrolleando exactamente igual que antes,
     // solo que el scrollbar vive en este div en vez de en el body.
-    <div className="App h-screen flex flex-col overflow-hidden bg-[#050505] text-[#F8FAFC]">
+    <div className="App h-screen flex flex-col overflow-hidden bg-[#0b0e13] text-[#F8FAFC]">
       <BrowserRouter>
         <NavBar stats={navBarStats} />
         <NavBarStatsSetterProvider value={setNavBarStats}>

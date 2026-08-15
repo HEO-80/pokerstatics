@@ -218,6 +218,59 @@ def hand_category_name(score: tuple) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Descripción EXACTA (categoría + rangos concretos) en español, para el
+# mensaje de victoria/resumen de mano — "Pareja" a secas no dice con qué
+# ganó; "Pareja de Reinas" sí. Nombres en singular (para "Escalera al X" /
+# "Carta Alta, X") y plural (para "Pareja/Trío/Full/Póker/Doble Pareja de
+# X[s]") indexados por rank 0..12 (mismo orden que RANKS = "23456789TJQKA").
+# Los plurales son irregulares en varios casos (Rey->Reyes, As->Ases,
+# Diez->Dieces por la regla z->ces) así que van tabulados a mano, no con un
+# "+s" genérico.
+# ---------------------------------------------------------------------------
+RANK_NAME_ES = [
+    "Dos", "Tres", "Cuatro", "Cinco", "Seis", "Siete", "Ocho", "Nueve",
+    "Diez", "Jota", "Reina", "Rey", "As",
+]
+RANK_NAME_ES_PLURAL = [
+    "Doses", "Treses", "Cuatros", "Cincos", "Seises", "Sietes", "Ochos",
+    "Nueves", "Dieces", "Jotas", "Reinas", "Reyes", "Ases",
+]
+SUIT_NAME_ES_PLURAL = {"c": "Tréboles", "d": "Diamantes", "h": "Corazones", "s": "Picas"}
+
+
+def hand_description_es(score: tuple, cards5: list[int]) -> str:
+    """
+    Descripción completa en español de una mano ganadora: categoría + los
+    rangos concretos que la forman (y, para color, el palo — el `score` no
+    lo guarda, así que hace falta `cards5`, las 5 cartas concretas que
+    devuelve `best_hand_with_cards`).
+    """
+    category = score[0]
+
+    if category == 8:  # escalera de color (incluye escalera real)
+        high = score[1]
+        if high == 12:
+            return "Escalera Real"
+        return f"Escalera de Color al {RANK_NAME_ES[high]}"
+    if category == 7:  # póker
+        return f"Póker de {RANK_NAME_ES_PLURAL[score[1]]}"
+    if category == 6:  # full
+        return f"Full de {RANK_NAME_ES_PLURAL[score[1]]} y {RANK_NAME_ES_PLURAL[score[2]]}"
+    if category == 5:  # color: el score no trae el palo, se lee de las cartas
+        suit_char = SUITS[cards5[0] % 4]
+        return f"Color de {SUIT_NAME_ES_PLURAL[suit_char]}"
+    if category == 4:  # escalera
+        return f"Escalera al {RANK_NAME_ES[score[1]]}"
+    if category == 3:  # trío
+        return f"Trío de {RANK_NAME_ES_PLURAL[score[1]]}"
+    if category == 2:  # doble pareja
+        return f"Doble Pareja de {RANK_NAME_ES_PLURAL[score[1]]} y {RANK_NAME_ES_PLURAL[score[2]]}"
+    if category == 1:  # pareja
+        return f"Pareja de {RANK_NAME_ES_PLURAL[score[1]]}"
+    return f"Carta Alta, {RANK_NAME_ES[score[1]]}"  # categoría 0
+
+
+# ---------------------------------------------------------------------------
 # 3) EQUITY  mano-vs-rango  (Monte Carlo)
 # ---------------------------------------------------------------------------
 def equity_vs_range(

@@ -1,5 +1,5 @@
 import { Link, NavLink } from "react-router-dom";
-import { Spade, LayoutDashboard, RotateCcw, Upload, Home, Gamepad2, Swords, Crown, LogOut } from "lucide-react";
+import { Spade, LayoutDashboard, RotateCcw, Upload, Home, Gamepad2, Swords, Crown } from "lucide-react";
 import { NAV } from "@/constants/testIds";
 
 // Pestaña activa estilo "carpeta": borde inferior de color + fondo tintado,
@@ -15,22 +15,54 @@ const linkActive = "text-white bg-white/10 border-[#3B82F6]";
 
 /** Una celda MESA/JUGADORES/STACK/NIVEL/CIEGAS de la cápsula de stats (Tarea
  * "layout sin scroll" §1): etiqueta pequeña arriba, valor debajo — el color
- * del valor es lo único que cambia entre celdas (ver `stats` en NavBar). */
-function StatCell({ label, value, valueClassName = "text-white", title }) {
+ * del valor es lo único que cambia entre celdas (ver `stats` en NavBar).
+ * `isLast` quita el separador vertical de la celda final, así el conjunto
+ * se lee como una sola pieza segmentada (cápsula), no cinco textos sueltos. */
+function StatCell({ label, value, valueClassName = "text-white", title, isLast = false }) {
   return (
-    <div className="flex flex-col leading-tight" title={title}>
-      <span className="text-[10px] uppercase tracking-wide text-[#475569]">{label}</span>
-      <span className={`text-[13px] font-bold font-mono-poker whitespace-nowrap ${valueClassName}`}>{value}</span>
+    <div
+      className={`flex flex-col leading-tight px-3 py-1 ${isLast ? "" : "border-r border-[#222a36]"}`}
+      title={title}
+    >
+      <span className="text-[9px] uppercase tracking-wide text-[#6b7686]">{label}</span>
+      <span className={`text-[12.5px] font-bold font-mono-poker whitespace-nowrap ${valueClassName}`}>{value}</span>
     </div>
   );
 }
 
+/** Estilo de cada botón de `stats.actions` (ver docstring de `NavBar` más
+ * abajo) — "plain" reproduce el botón "Salir" de siempre (Sit&Go); "neutral"/
+ * "neutral-active" y "danger" son los que pide Torneo (acción neutra vs.
+ * acción destructiva, visualmente distintas a propósito). */
+const ACTION_VARIANT_CLASS = {
+  plain: "border border-white/12 text-white hover:bg-white/5",
+  neutral: "bg-[#161b24] border border-[#2f3846] text-[#B8C1CE] shadow-[0_3px_9px_rgba(0,0,0,.45)] hover:bg-[#1a212c]",
+  "neutral-active": "bg-[#1f1633] border border-[#7c3aed]/60 text-[#c4a3f7] shadow-[0_3px_9px_rgba(0,0,0,.45)]",
+  danger:
+    "bg-red-500/12 border border-[#b13c3c] text-[#f78b8b] shadow-[0_3px_9px_rgba(0,0,0,.4),0_0_10px_rgba(239,68,68,.25)] hover:bg-red-500/18",
+};
+
+function NavBarAction({ action }) {
+  const Icon = action.icon;
+  const variantKey = action.active ? "neutral-active" : (action.variant ?? "plain");
+  return (
+    <button
+      type="button"
+      data-testid={action.testId}
+      aria-pressed={action.active}
+      onClick={action.onClick}
+      className={`px-3 py-1.5 rounded-lg text-xs font-display uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 shrink-0 ${ACTION_VARIANT_CLASS[variantKey]}`}
+    >
+      {Icon && <Icon className="w-3.5 h-3.5" />} {action.label}
+    </button>
+  );
+}
+
 /**
- * `stats`: null (nada en juego ahora mismo) o
- * `{ mesa, jugadores, stack, nivel, ciegas, nivelHint?, onExit, exitTestId? }`
- * — publicado por la página en curso vía hooks/useNavBarStats.js (hoy solo
- * SitAndGo.jsx). NavBar no conoce ninguna lógica de juego: solo pinta lo que
- * le llega.
+ * `stats`: null (nada en juego ahora mismo) o `{ capsule?, actions? }` —
+ * publicado por la página en curso vía hooks/useNavBarStats.js (ver ese
+ * archivo para la forma completa). NavBar no conoce ninguna lógica de juego:
+ * solo pinta lo que le llega.
  */
 export default function NavBar({ stats = null }) {
   return (
@@ -112,25 +144,20 @@ export default function NavBar({ stats = null }) {
           </nav>
         </div>
 
-        {stats && (
-          <div className="flex items-center gap-4 shrink-0">
-            <div className="flex items-center gap-4">
-              <StatCell label="Mesa" value={stats.mesa} valueClassName="text-[#8B5CF6]" />
-              <StatCell label="Jugadores" value={stats.jugadores} />
-              <StatCell label="Stack" value={stats.stack} valueClassName="text-[#10B981]" />
-              <StatCell label="Nivel" value={stats.nivel} title={stats.nivelHint} />
-              <StatCell label="Ciegas" value={stats.ciegas} valueClassName="text-[#F59E0B]" />
-            </div>
-            {stats.onExit && (
-              <button
-                type="button"
-                data-testid={stats.exitTestId}
-                onClick={stats.onExit}
-                className="px-3 py-1.5 rounded-lg border border-white/12 text-white text-xs font-display uppercase tracking-wider hover:bg-white/5 transition-colors inline-flex items-center gap-1.5 shrink-0"
-              >
-                <LogOut className="w-3.5 h-3.5" /> Salir
-              </button>
+        {stats && (stats.capsule || stats.actions) && (
+          <div className="flex items-center gap-3 shrink-0">
+            {stats.capsule && (
+              <div className="flex items-stretch bg-[#161b24] border border-[#252d3a] rounded-lg overflow-hidden shadow-[0_2px_6px_rgba(0,0,0,.4)]">
+                <StatCell label="Mesa" value={stats.capsule.mesa} valueClassName="text-[#8B5CF6]" />
+                <StatCell label="Jugadores" value={stats.capsule.jugadores} />
+                <StatCell label="Stack" value={stats.capsule.stack} valueClassName="text-[#10B981]" />
+                <StatCell label="Nivel" value={stats.capsule.nivel} title={stats.capsule.nivelHint} />
+                <StatCell label="Ciegas" value={stats.capsule.ciegas} valueClassName="text-[#F59E0B]" isLast />
+              </div>
             )}
+            {stats.actions?.map((action) => (
+              <NavBarAction key={action.key} action={action} />
+            ))}
           </div>
         )}
       </div>

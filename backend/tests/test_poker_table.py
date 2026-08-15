@@ -103,7 +103,7 @@ def test_heads_up_showdown_aa_beats_kk():
     assert result["winners"] == [0]
     assert result["share"] == 20
     assert result["payouts"] == {0: 20}
-    assert result["hand_name"] == "Pareja"
+    assert result["hand_name"] == "Pareja de Ases"
     assert set(result["winning_hands"][0]) == {
         make_card("A", "s"), make_card("A", "h"),
         make_card("9", "h"), make_card("7", "d"), make_card("4", "c"),
@@ -162,7 +162,7 @@ def test_side_pot_short_stack_wins_main_pot_only():
     assert main_pot["winners"] == [0]         # bote principal: AA se lo lleva
     assert main_pot["share"] == 300
     assert main_pot["payouts"] == {0: 300}
-    assert main_pot["hand_name"] == "Pareja"
+    assert main_pot["hand_name"] == "Pareja de Ases"
     assert set(main_pot["winning_hands"][0]) == {
         make_card("A", "s"), make_card("A", "h"),
         make_card("9", "h"), make_card("7", "d"), make_card("4", "c"),
@@ -172,7 +172,7 @@ def test_side_pot_short_stack_wins_main_pot_only():
     assert side_pot["winners"] == [1]         # bote lateral: KK > QQ
     assert side_pot["share"] == 800
     assert side_pot["payouts"] == {1: 800}
-    assert side_pot["hand_name"] == "Pareja"
+    assert side_pot["hand_name"] == "Pareja de Reyes"
     assert set(side_pot["winning_hands"][1]) == {
         make_card("K", "s"), make_card("K", "h"),
         make_card("9", "h"), make_card("7", "d"), make_card("4", "c"),
@@ -228,7 +228,7 @@ def test_showdown_tie_splits_pot_evenly_with_matching_categories():
     assert sorted(result["winners"]) == [0, 1]
     assert result["share"] == 10
     assert result["payouts"] == {0: 10, 1: 10}
-    assert result["hand_name"] == "Pareja"
+    assert result["hand_name"] == "Pareja de Nueves"
     assert set(result["winning_hands"][0]) == {
         make_card("9", "d"), make_card("9", "h"), make_card("K", "c"),
         make_card("7", "s"), make_card("4", "h"),

@@ -272,7 +272,7 @@ def test_full_hand_flush_height_tiebreak_awards_pot_to_single_winner():
     assert len(hand.winners_by_pot) == 1
     result = hand.winners_by_pot[0]
     assert result["winners"] == [0]  # gana SOLO el hero, no hay empate
-    assert result["hand_name"] == "Color"
+    assert result["hand_name"] == "Color de Corazones"
     assert result["amount"] == 20
     assert result["payouts"] == {0: 20}
     assert hand.players[0].stack == 1000 - 10 + 20
@@ -299,7 +299,7 @@ def test_full_hand_real_tie_when_both_only_play_the_board_splits_pot():
     assert hand.is_complete
     result = hand.winners_by_pot[0]
     assert set(result["winners"]) == {0, 1}  # empate real: se reparte
-    assert result["hand_name"] == "Color"
+    assert result["hand_name"] == "Color de Corazones"
     assert result["amount"] == 20
     assert result["share"] == 10
     assert result["payouts"] == {0: 10, 1: 10}

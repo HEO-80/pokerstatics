@@ -387,3 +387,63 @@ Para lo inmediato: cuando termines el log de actividad, mi propuesta es hacer es
 - Backend PARA JUGAR: uvicorn server:app --port 8000 (SIN --reload)
 - Frontend: cd frontend && yarn start · Mongo: docker start mongo-preflop
 - Commit tras cada pieza que funcione.
+
+-----------
+8/15/2026
+
+markdown
+## EN CURSO / PENDIENTE (por orden)
+
+### AHORA
+- 🔨 Botones de COPIAR (para pegar/analizar partidas — el portapapeles no tiene límite práctico)
+    - Actividad: copiar toda la actividad de la partida
+    - Ayuda: DOS botones (solo la ayuda de la mano actual · toda la ayuda de todas las manos)
+    - Coach IA: un botón de copiar
+    - (Fase 1: confirmar que el frontend retiene la ayuda/IA de toda la sesión)
+
+### PIEZAS GRANDES (suben el nivel de juego)
+- ⬜ Tamaño de apuesta: tamaños sensatos (1/3 · 1/2 · bote), sondear en vez de ir a tope,
+     check para inducir. La parte fina (según lectura del rival) la lleva la IA
+- ⬜ Cablear los RANGOS REALES de Mongo a los bots (decide() ya acepta preflop_range)
+
+### PERSISTENCIA / CUENTAS
+- ⬜ Historial por partida NUMERADA en MongoDB (no ficheros sueltos): manos, actividad,
+     ayuda y consultas al coach. "Torneos / Sit&Go / manos fallidas" = filtros, no carpetas.
+     Botón "exportar partida" que genera el archivo al vuelo
+- ⬜ Registro / login (guardar progreso y torneos por persona) — mismo track que lo anterior
+
+### TORNEO (contenido)
+- ⬜ 9 super-pros con nombre + resto de perfiles mezclados (pros / normales / amateurs en %)
+- ⬜ Prompt de IA con mentalidad de TORNEO (ICM, stack, llegar a premios)
+
+### PULIDO Y UTILIDADES
+- ⬜ Botones de voz separados (IA arriba / consejo abajo, icono que NO sea micro)
+- ⬜ Voz de IA realista (si la del navegador no convence — de pago)
+- ⬜ Glosario de términos (nit/tag/lag/station, +EV/-EV, etc.) pagina
+- ⬜ Orden de apuestas + re-raise mínimo (verificar reglas NLHE)
+- ⬜ Sombras / pulido visual de la UI (Sit&Go y demás pestañas: Stats, Review…)
+-     cada juego de cada pagina tiene que tener su funcioinalidad correcta ahora tendriamos torneo y sitandgo faltan las otras revisar
+
+
+### APARCADO (cuando queramos)
+- ⬜ Subir el límite de la respuesta de la IA (el texto que se cortaba — maxOutputTokens o resumen)
+- ⬜ Valoración de fin de partida con IA (juzga la sesión: reconoce balanceo, decisión vs resultado, ICM)
+
+### A VERIFICAR JUGANDO (Sit&Go)
+- ⬜ Errata "Fue Corazones" → debe ser "Color de corazones"
+- ⬜ Frase de fold-win ("gana porque el resto se retira")
+
+## EL COACH — actualización
+Marca como COMPLETO estos tres pasos (eran el "IA de bots más realista" + más):
+- ✅ Factor de realización (R): corta calls que sangran fuera de posición / multiway
+- ✅ La fuerza manda: mano fuerte → sube, nunca foldea (arreglado el AK)
+- ✅ Consciente del stack: push/fold por ciegas (premium resube, par medio call/shove según profundidad)
+- ✅ Bots realistas: defienden ciegas, buckets postflop, farol con criterio (112 tests)
+
+## MESA VISUAL — añadir a COMPLETO
+- ✅ Rediseño Sit&Go: navbar ancho completo, 3 toggles independientes (Ayuda/CoachIA/Actividad),
+     veredicto arriba + cajas + desplegables, toggle fichas↔ciegas
+- ✅ Resultados claros: jugada exacta ("Pareja de Doses"), cartas del ganador y las 5 de la mejor mano
+
+## BUGS RESUELTOS (añadir)
+- ✅ "Escalera fantasma": NO era bug — con T♥8♣ en board sin J ni 6, es carta alta (verificado)
