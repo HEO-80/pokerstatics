@@ -4,7 +4,7 @@ import { fetchTableCoach, sendTableAction } from "@/lib/api";
 import { animateHandUpdate, buildHeroLogEntry, buildInitialFrame, createRaiseTracker } from "@/lib/handAnimation";
 import { createSkipSignal, dealTotalDuration, waitOrSkip } from "@/lib/dealAnimation";
 import { seatName } from "@/lib/table";
-import { createHandRecord, boardStreetsFromCards, mergeBoardStreets } from "@/lib/handHistory";
+import { createHandRecord, boardStreetsFromCards, mergeBoardStreets, deriveFlopReveal } from "@/lib/handHistory";
 import { groupPotResults, formatPotGroupText } from "@/lib/potResults";
 import { loadHandHistory, saveHandHistory, clearHandHistory } from "@/lib/handHistoryStorage";
 import {
@@ -15,6 +15,7 @@ import {
   pairHeroAction,
   pairHandResult,
 } from "@/lib/coachAdvice";
+import { loadAiAnalysis, saveAiAnalysis, clearAiAnalysis } from "@/lib/aiAnalysisStorage";
 import { playDeal, playChip } from "@/lib/sound";
 
 const CHIP_SOUND_ACTIONS = new Set(["call", "raise", "all_in"]);
@@ -51,19 +52,29 @@ const CHIP_SOUND_ACTIONS = new Set(["call", "raise", "all_in"]);
  * partida (lib/sessionSummary.js) tenga datos de todas las decisiones, no
  * solo de las que el jugador miró.
  *
- * `storageKey` (opcional) activa la persistencia de `handHistory` Y
- * `coachAdviceLog` en localStorage (ver lib/handHistoryStorage.js /
- * lib/coachAdvice.js): se siembra el estado inicial desde lo guardado (así
- * sobrevive a recargar la página a media partida) y se regraba en cada
- * cambio. `reset()` y la recuperación por hand_id perdido (404) limpian
- * también lo persistido — una partida NUEVA no debe arrastrar el historial
- * de la anterior. Sin `storageKey` (Práctica) el hook se comporta igual,
- * solo en memoria.
+ * `storageKey` (opcional) activa la persistencia de `handHistory`,
+ * `coachAdviceLog` Y `aiByEntryId` en localStorage (ver
+ * lib/handHistoryStorage.js / lib/coachAdvice.js / lib/aiAnalysisStorage.js):
+ * se siembra el estado inicial desde lo guardado (así sobrevive a recargar
+ * la página a media partida, o a que el hero sea eliminado y la mesa se
+ * desmonte) y se regraba en cada cambio. `reset()` y la recuperación por
+ * hand_id perdido (404) limpian también lo persistido — una partida NUEVA no
+ * debe arrastrar el historial de la anterior. Sin `storageKey` (Práctica) el
+ * hook se comporta igual, solo en memoria.
+ *
+ * `aiByEntryId` (respuestas del Coach IA v2, ver lib/api.js
+ * fetchTableCoachAi) vive AQUÍ y no en HandTable.jsx porque HandTable se
+ * desmonta en cuanto la página sale de la mesa en juego (p.ej. Torneo pasa a
+ * su pantalla de "eliminado"/"ganaste"/"saliste") — si el estado viviera ahí
+ * se perdería en ese momento aunque estuviera persistido en localStorage.
+ * Al vivir en el hook, sobrevive tanto a la desmontada de HandTable como a
+ * un refresco de página, igual que `coachAdviceLog`.
  */
 export function useTableSession(storageKey) {
   const [view, setView] = useState(null);
   const [handHistory, setHandHistory] = useState(() => (storageKey ? loadHandHistory(storageKey) : []));
   const [coachAdviceLog, setCoachAdviceLog] = useState(() => (storageKey ? loadCoachAdviceLog(storageKey) : []));
+  const [aiByEntryId, setAiByEntryId] = useState(() => (storageKey ? loadAiAnalysis(storageKey) : {}));
 
   useEffect(() => {
     if (storageKey) saveHandHistory(storageKey, handHistory);
@@ -72,6 +83,10 @@ export function useTableSession(storageKey) {
   useEffect(() => {
     if (storageKey) saveCoachAdviceLog(storageKey, coachAdviceLog);
   }, [storageKey, coachAdviceLog]);
+
+  useEffect(() => {
+    if (storageKey) saveAiAnalysis(storageKey, aiByEntryId);
+  }, [storageKey, aiByEntryId]);
 
   const [loading, setLoading] = useState(false);
   const [animating, setAnimating] = useState(false);
@@ -149,12 +164,14 @@ export function useTableSession(storageKey) {
       updateCurrentHand((hand) => {
         const board = mergeBoardStreets(hand.board, boardStreetsFromCards(data.board || []));
         let result = hand.result;
+        let flopReveal = hand.flopReveal;
         if (data.finished && data.winners_by_pot) {
           const resolvedPlayers = data.players.map((p) => ({ ...p, name: resolveNameRef.current(p.seat) }));
           const groups = groupPotResults(data.winners_by_pot, resolvedPlayers);
           result = { groups, lines: groups.map((g) => formatPotGroupText(g, resolvedPlayers)) };
+          flopReveal = deriveFlopReveal(hand.actions, board, resolvedPlayers, data.winners_by_pot);
         }
-        return { ...hand, board, result, finished: !!data.finished };
+        return { ...hand, board, result, flopReveal, finished: !!data.finished };
       });
       if (data.finished && data.winners_by_pot) {
         const heroWonHand = data.winners_by_pot.some((pot) => pot.winners.includes(data.hero_seat));
@@ -168,6 +185,7 @@ export function useTableSession(storageKey) {
     setView(null);
     setHandHistory([]);
     setCoachAdviceLog([]);
+    setAiByEntryId({});
     handNumberRef.current = 0;
     pendingAdviceIdRef.current = null;
     setError(null);
@@ -175,6 +193,7 @@ export function useTableSession(storageKey) {
     if (storageKey) {
       clearHandHistory(storageKey);
       clearCoachAdviceLog(storageKey);
+      clearAiAnalysis(storageKey);
     }
   }, [storageKey]);
 
@@ -190,11 +209,13 @@ export function useTableSession(storageKey) {
         setView(null);
         setHandHistory([]);
         setCoachAdviceLog([]);
+        setAiByEntryId({});
         handNumberRef.current = 0;
         pendingAdviceIdRef.current = null;
         if (storageKey) {
           clearHandHistory(storageKey);
           clearCoachAdviceLog(storageKey);
+          clearAiAnalysis(storageKey);
         }
         onHandLost?.();
         return;
@@ -398,6 +419,8 @@ export function useTableSession(storageKey) {
     setView,
     handHistory,
     coachAdviceLog,
+    aiByEntryId,
+    setAiByEntryId,
     loading,
     animating,
     dealing,

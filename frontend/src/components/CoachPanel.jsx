@@ -5,6 +5,7 @@ import { summarizeHand } from "@/lib/handSummary";
 import { PLAY } from "@/constants/testIds";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import BaseCardRow from "./CardGlyphRow";
+import CopyIconButton from "./CopyIconButton";
 
 function CardText({ cards }) {
   return <BaseCardRow cards={cards} gap="gap-1" />;
@@ -73,7 +74,7 @@ function verdictTitle(rec) {
  * también ya terminó (p.ej. el hero acaba de ganar/perder el showdown y esa
  * fue su última decisión), añade su resumen igual al final de la lista.
  */
-function buildNavigableSlides(coachAdviceLog, handHistory) {
+export function buildNavigableSlides(coachAdviceLog, handHistory) {
   const handByNumber = new Map((handHistory || []).map((h) => [h.number, h]));
   const slides = [];
   let lastHandNumber = null;
@@ -93,6 +94,56 @@ function buildNavigableSlides(coachAdviceLog, handHistory) {
   if (lastHandNumber != null) pushHandSummaryIfFinished(lastHandNumber);
 
   return slides;
+}
+
+/**
+ * Texto plano de UNA diapositiva (para los botones de copiar) — reutiliza
+ * los mismos helpers que ya pintan cada tipo de diapositiva (situationText/
+ * readingText/outcomeText/recommendationLabel para "advice",
+ * summarizeHand para "handSummary": mismos campos que ya usa
+ * HandSummaryView, aquí solo unidos en líneas en vez de JSX) para no
+ * duplicar ningún criterio de redacción.
+ */
+function adviceEntryText(entry) {
+  const lines = [situationText(entry)];
+  const boardPart = entry.board?.length ? ` · Board: ${entry.board.join(" ")}` : "";
+  lines.push(`Cartas: ${(entry.heroCards ?? []).join(" ")}${boardPart}`);
+  lines.push(readingText(entry));
+  if (entry.recommendation) {
+    lines.push(`${recommendationLabel(entry.recommendation)} — ${entry.recommendation.explicacion}`);
+  }
+  const outcome = outcomeText(entry);
+  if (outcome) lines.push(outcome);
+  return lines.join("\n");
+}
+
+function handSummaryText(hand, coachAdviceLog) {
+  const summary = summarizeHand(hand, coachAdviceLog);
+  if (!summary) return "";
+  const lines = [`MANO ${summary.handNumber} — Resumen`];
+  const boardPart = summary.board.length ? ` · Board: ${summary.board.join(" ")}` : "";
+  lines.push(`Cartas: ${summary.heroCards.join(" ")}${boardPart}`);
+  lines.push(...summary.resultLines);
+  if (summary.decisions.length > 0) {
+    lines.push("Tus decisiones:");
+    summary.decisions.forEach((d) => lines.push(`- ${d.text}`));
+  }
+  if (summary.resultVsDecisionNote) lines.push(summary.resultVsDecisionNote);
+  if (summary.verdictLabel) lines.push(summary.verdictLabel);
+  return lines.join("\n");
+}
+
+function slideText(slide, coachAdviceLog) {
+  if (!slide) return "";
+  if (slide.type === "advice") return adviceEntryText(slide.entry);
+  if (slide.type === "handSummary") return handSummaryText(slide.hand, coachAdviceLog);
+  return "";
+}
+
+/** Texto plano de TODAS las diapositivas de la sesión (consejos + resúmenes
+ * de mano), en el mismo orden navegable ◀▶, separadas por línea en blanco. */
+export function allSlidesText(slides, coachAdviceLog) {
+  return slides.map((s) => slideText(s, coachAdviceLog)).join("\n\n");
 }
 
 /**
@@ -183,7 +234,23 @@ export default function CoachPanel({ active, coachAdviceLog, handHistory }) {
   return (
     <div className="h-full flex flex-col gap-2.5 text-sm leading-relaxed">
       <div className="shrink-0 rounded-lg border border-[#252d3a] bg-[#161b24] shadow-[0_2px_6px_rgba(0,0,0,.35)] px-3 py-2 flex flex-col gap-1.5">
-        <div className="text-[10px] uppercase tracking-widest text-[#6b7686]">Ayuda</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] uppercase tracking-widest text-[#6b7686]">Ayuda</div>
+          <div className="flex items-center gap-1.5">
+            <CopyIconButton
+              getText={() => slideText(slide, coachAdviceLog)}
+              title="Copiar esta ayuda"
+              testId={PLAY.coachCopyCurrentBtn}
+              disabled={!slide}
+            />
+            <CopyIconButton
+              getText={() => allSlidesText(slides, coachAdviceLog)}
+              title="Copiar toda la ayuda de la sesión"
+              testId={PLAY.coachCopyAllBtn}
+              disabled={slides.length === 0}
+            />
+          </div>
+        </div>
         <div className="flex items-center justify-between gap-2 text-xs">
           <button
             type="button"

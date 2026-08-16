@@ -31,6 +31,8 @@ export default function Practice() {
     view,
     handHistory,
     coachAdviceLog,
+    aiByEntryId,
+    setAiByEntryId,
     loading,
     animating,
     dealing,
@@ -128,6 +130,8 @@ export default function Practice() {
           roles={roles}
           handHistory={handHistory}
           coachAdviceLog={coachAdviceLog}
+          aiByEntryId={aiByEntryId}
+          setAiByEntryId={setAiByEntryId}
           onAction={applyAction}
           loading={loading || animating}
           dealing={dealing}

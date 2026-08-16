@@ -85,6 +85,8 @@ export default function SitAndGo() {
     view,
     handHistory,
     coachAdviceLog,
+    aiByEntryId,
+    setAiByEntryId,
     loading,
     animating,
     dealing,
@@ -280,6 +282,8 @@ export default function SitAndGo() {
             roles={roles}
             handHistory={handHistory}
             coachAdviceLog={coachAdviceLog}
+            aiByEntryId={aiByEntryId}
+            setAiByEntryId={setAiByEntryId}
             onAction={applyAction}
             loading={loading || animating}
             dealing={dealing}

@@ -4,6 +4,7 @@ import { Swords, RotateCw, LogOut, ListOrdered, Skull, Trophy } from "lucide-rea
 import HandTable from "@/components/HandTable";
 import ActivityLog from "@/components/ActivityLog";
 import SessionSummary from "@/components/SessionSummary";
+import SessionCopyButtons from "@/components/SessionCopyButtons";
 import TournamentRankingPanel from "@/components/TournamentRankingPanel";
 import TournamentStatsBar from "@/components/TournamentStatsBar";
 import { createTableHand, simulateMttRound } from "@/lib/api";
@@ -129,6 +130,8 @@ export default function Tournament() {
     view,
     handHistory,
     coachAdviceLog,
+    aiByEntryId,
+    setAiByEntryId,
     loading,
     animating,
     dealing,
@@ -504,6 +507,8 @@ export default function Tournament() {
             roles={roles}
             handHistory={handHistory}
             coachAdviceLog={coachAdviceLog}
+            aiByEntryId={aiByEntryId}
+            setAiByEntryId={setAiByEntryId}
             onAction={applyAction}
             loading={loading || animating}
             dealing={dealing}
@@ -665,6 +670,13 @@ export default function Tournament() {
                 </div>
               )}
               <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
+              <div className="mb-4">
+                <SessionCopyButtons
+                  handHistory={handHistory}
+                  coachAdviceLog={coachAdviceLog}
+                  aiByEntryId={aiByEntryId}
+                />
+              </div>
               <div className="mb-6 text-left">
                 <SessionSummary
                   coachAdviceLog={coachAdviceLog}
@@ -700,6 +712,13 @@ export default function Tournament() {
               <div className="text-[#94A3B8] mb-6">
                 Te impusiste a los {config?.totalEntrants} inscritos hasta quedarte con todas las fichas.
               </div>
+              <div className="mb-4">
+                <SessionCopyButtons
+                  handHistory={handHistory}
+                  coachAdviceLog={coachAdviceLog}
+                  aiByEntryId={aiByEntryId}
+                />
+              </div>
               <div className="mb-6 text-left">
                 <SessionSummary
                   coachAdviceLog={coachAdviceLog}
@@ -728,6 +747,13 @@ export default function Tournament() {
                 Has salido del torneo
               </div>
               <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
+              <div className="mb-4">
+                <SessionCopyButtons
+                  handHistory={handHistory}
+                  coachAdviceLog={coachAdviceLog}
+                  aiByEntryId={aiByEntryId}
+                />
+              </div>
               <div className="mb-6 text-left">
                 <SessionSummary
                   coachAdviceLog={coachAdviceLog}

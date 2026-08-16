@@ -2,7 +2,9 @@ import { Fragment, useEffect, useRef } from "react";
 import { Trophy } from "lucide-react";
 import { seatName } from "@/lib/table";
 import { STREET_ORDER } from "@/lib/handHistory";
+import { PLAY } from "@/constants/testIds";
 import CardRow from "./CardGlyphRow";
+import CopyIconButton from "./CopyIconButton";
 
 /**
  * `entry.raiseNumber` (adjuntado en handAnimation.js/useTableSession.js al
@@ -63,6 +65,44 @@ function handHeaderText(hand) {
   if (hand.level != null) parts.push(`Nivel ${hand.level}`);
   parts.push(`Ciegas ${hand.sb}/${hand.bb}`);
   return `──── ${parts.join(" · ")} ────`;
+}
+
+/**
+ * Versión en TEXTO PLANO de una mano (para el botón de copiar) — misma
+ * estructura y mismos helpers que HandHistoryBlock (handHeaderText/
+ * positionsLine/formatBotAction), sin JSX ni glifos: cartas como el string
+ * crudo ("Ah", "Td"), legible tal cual al pegar en otro sitio.
+ */
+function handHistoryText(hand) {
+  const lines = [handHeaderText(hand), positionsLine(hand)];
+  if (hand.heroCards) lines.push(`Tus cartas: ${hand.heroCards.join(" ")}`);
+  STREET_ORDER.forEach((street) => {
+    const boardCards = street === "flop" ? hand.board.flop : street !== "preflop" ? [hand.board[street]] : null;
+    const showDeal = street !== "preflop" && boardCards && boardCards[0];
+    const actions = hand.actions.filter((a) => a.street === street);
+    if (!showDeal && actions.length === 0) return;
+    if (showDeal) lines.push(`[${street}] Reparto: ${boardCards.join(" ")}`);
+    actions.forEach((entry) => {
+      lines.push(`[${street}] ${formatBotAction(entry)}${entry.isHero ? " · tú" : ""}`);
+    });
+  });
+  (hand.result?.lines ?? []).forEach((line, i) => {
+    lines.push(line);
+    const winnerHands = hand.result.groups?.[i]?.winnerHands;
+    (winnerHands ?? []).forEach((w) => lines.push(`  ${w.name}: ${w.cards.join(" ")}`));
+  });
+  if (hand.flopReveal?.length) {
+    lines.push("Cartas de quien vio el flop:");
+    hand.flopReveal.forEach((p) => lines.push(`  ${p.isWinner ? "★ " : ""}${p.name}: ${p.cards.join(" ")}`));
+  }
+  return lines.join("\n");
+}
+
+/** Texto plano de TODA la actividad de la sesión (todas las manos de
+ * `handHistory`, en orden), una mano tras otra separadas por línea en
+ * blanco — lo que copia el botón de la cabecera del panel. */
+export function formatActivityLogText(handHistory) {
+  return (handHistory ?? []).map(handHistoryText).join("\n\n");
 }
 
 /**
@@ -129,6 +169,18 @@ function HandHistoryBlock({ hand }) {
           </div>
         );
       })}
+      {hand.flopReveal && hand.flopReveal.length > 0 && (
+        <div className="pt-1 mt-0.5 border-t border-[#252d3a] space-y-0.5">
+          <div className="text-[9px] uppercase tracking-widest text-[#475569]">Vieron el flop</div>
+          {hand.flopReveal.map((p) => (
+            <div key={p.seat} className="text-xs leading-snug flex items-center gap-1.5">
+              {p.isWinner && <Trophy className="w-3 h-3 text-[#F59E0B] shrink-0" />}
+              <span className={p.isWinner ? "text-[#F59E0B] font-semibold" : "text-[#94A3B8]"}>{p.name}:</span>
+              <CardRow cards={p.cards} />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -162,7 +214,15 @@ export default function ActivityLog({ handHistory, testId, className }) {
 
   return (
     <div data-testid={testId} ref={logRef} onScroll={handleLogScroll} className={className}>
-      <div className="shrink-0 text-[10px] uppercase tracking-widest text-[#475569] mb-2">Actividad</div>
+      <div className="shrink-0 mb-2 flex items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-widest text-[#475569]">Actividad</div>
+        <CopyIconButton
+          getText={() => formatActivityLogText(handHistory)}
+          title="Copiar toda la actividad"
+          testId={PLAY.activityCopyBtn}
+          disabled={handHistory.length === 0}
+        />
+      </div>
       {handHistory.length === 0 && <div className="text-[#475569] text-xs">Sin manos todavía.</div>}
       <div className="space-y-3">
         {handHistory.map((hand) => (

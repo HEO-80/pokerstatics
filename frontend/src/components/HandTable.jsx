@@ -7,6 +7,7 @@ import TurnTimer from "./TurnTimer";
 import CardRow from "./CardGlyphRow";
 import CoachPanel, { villainStyleText, readingText, recommendationLabel } from "./CoachPanel";
 import AiCoachPanel from "./AiCoachPanel";
+import CopyIconButton from "./CopyIconButton";
 import { PLAY, POINTS } from "@/constants/testIds";
 import { groupPotResults, formatPotGroupText, collectHighlightedCards } from "@/lib/potResults";
 import { useSoundPreference, playYourTurn, playWin, playLose } from "@/lib/sound";
@@ -78,6 +79,18 @@ function buildCoachSpokenText(entry) {
   return parts.join(" ");
 }
 
+/** Texto plano de todos los análisis de IA ya COMPLETADOS de la sesión: cruza
+ * `coachAdviceLog` (contexto — mano/calle de cada decisión, en orden
+ * cronológico) con `aiByEntryId` (la respuesta de la IA para esa decisión,
+ * si se llegó a pedir) por `entry.id`, y descarta las que están cargando o
+ * fallaron (solo `status === "done"` tiene texto que copiar). */
+export function buildAiAnalysisText(coachAdviceLog, aiByEntryId) {
+  return (coachAdviceLog ?? [])
+    .filter((entry) => aiByEntryId[entry.id]?.status === "done")
+    .map((entry) => `Mano ${entry.handNumber} · ${entry.street}\n${aiByEntryId[entry.id].text}`)
+    .join("\n\n");
+}
+
 /**
  * Mesa + controles + historial de Actividad para una mesa en vivo, común a
  * Práctica, Torneo y Sit & Go (todos consumen la misma API /api/table/*,
@@ -114,6 +127,8 @@ export default function HandTable({
   roles,
   handHistory,
   coachAdviceLog,
+  aiByEntryId,
+  setAiByEntryId,
   onAction,
   loading,
   finishedActions,
@@ -125,6 +140,11 @@ export default function HandTable({
   // siempre lo pasan) el badge del HUD simplemente no se pinta.
   pointsProgress,
 }) {
+  // `aiByEntryId`/`setAiByEntryId` (respuestas del Coach IA v2) vienen del
+  // padre (useTableSession) en vez de ser estado local de este componente:
+  // así sobreviven a que HandTable se desmonte (p.ej. al ser eliminado en
+  // Torneo, ver docstring de useTableSession.js) y se persisten en
+  // localStorage igual que handHistory/coachAdviceLog.
   const [helpOpen, setHelpOpen] = useState(loadHelpOpen);
   const [soundEnabled, toggleSound] = useSoundPreference();
   // Voz del coach (lib/speech.js) — preferencia SEPARADA del sonido de
@@ -171,7 +191,6 @@ export default function HandTable({
   const liveAdviceEntry = heroTurnActive && coachAdviceLog.length > 0
     ? coachAdviceLog[coachAdviceLog.length - 1]
     : null;
-  const [aiByEntryId, setAiByEntryId] = useState({});
   const aiState = liveAdviceEntry ? aiByEntryId[liveAdviceEntry.id] : undefined;
 
   // Lectura por voz del coach v1: en cuanto aparece un consejo NUEVO sobre
@@ -226,7 +245,7 @@ export default function HandTable({
         },
       }));
     }
-  }, [liveAdviceEntry, view.hand_id, handHistory, voiceEnabled]);
+  }, [liveAdviceEntry, view.hand_id, handHistory, voiceEnabled, setAiByEntryId]);
 
   const stopAiSpeaking = useCallback(() => {
     stopSpeaking();
@@ -287,15 +306,23 @@ export default function HandTable({
                 <div className="text-[10px] uppercase tracking-widest text-[#c4b5fd] flex items-center gap-1.5">
                   <Sparkles className="w-3 h-3" /> Coach IA
                 </div>
-                <button
-                  type="button"
-                  data-testid={PLAY.coachAiCloseBtn}
-                  aria-label="Cerrar Coach IA"
-                  onClick={() => setAiOpen(false)}
-                  className="p-1 rounded-md text-[#94A3B8] hover:text-white hover:bg-white/10 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <CopyIconButton
+                    getText={() => buildAiAnalysisText(coachAdviceLog, aiByEntryId)}
+                    title="Copiar análisis de IA"
+                    testId={PLAY.coachAiCopyBtn}
+                    disabled={!Object.values(aiByEntryId).some((s) => s?.status === "done")}
+                  />
+                  <button
+                    type="button"
+                    data-testid={PLAY.coachAiCloseBtn}
+                    aria-label="Cerrar Coach IA"
+                    onClick={() => setAiOpen(false)}
+                    className="p-1 rounded-md text-[#94A3B8] hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <AiCoachPanel
                 canAsk={!!liveAdviceEntry}

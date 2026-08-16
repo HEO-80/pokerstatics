@@ -11,6 +11,9 @@
 //     board: { flop: string[]|null, turn: string|null, river: string|null },
 //     actions: [{ street, seat, name, action, amount, total, raiseNumber, isHero }],
 //     result: { groups, lines } | null,
+//     flopReveal: [{ seat, name, cards, isWinner }] | null (solo si la mano tuvo
+//       flop; uno por asiento que NO se retiró en preflop, ganador(es) primero
+//       — ver deriveFlopReveal más abajo),
 //     finished,
 //   }
 //
@@ -53,6 +56,7 @@ export function createHandRecord({ number, level, sb, bb, buttonSeat, heroSeat, 
     board: { flop: null, turn: null, river: null },
     actions: [],
     result: null,
+    flopReveal: null,
     finished: false,
   };
 }
@@ -76,4 +80,38 @@ export function mergeBoardStreets(existing, incoming) {
     turn: existing.turn ?? incoming.turn,
     river: existing.river ?? incoming.river,
   };
+}
+
+/**
+ * Cartas de los jugadores que LLEGARON AL FLOP (no se retiraron en preflop)
+ * de una mano ya terminada, para analizarla a posteriori aunque alguno se
+ * retirase después en flop/turn/river — no solo el ganador ni solo quien
+ * llegó a showdown.
+ *
+ * "Llegó al flop" se deriva del propio log de acciones (`actions`, ya
+ * acumulado street a street por useTableSession.js): cualquier asiento que
+ * NO tenga un `fold` en `street === "preflop"` vio el flop por definición en
+ * cuanto la mano lo alcanza (incluido el que se va all-in preflop). Null si
+ * la mano se decidió en preflop (`board.flop` nunca llegó a rellenarse) —
+ * ahí no hay flop que mostrar.
+ *
+ * `players` son los jugadores YA RESUELTOS de la respuesta final del backend
+ * (mismo array que usa `groupPotResults` para el resultado, ver
+ * useTableSession.js) — con la mano terminada el backend revela
+ * `hole_cards` de TODOS (`reveal_all`, ver poker_table_api.py `_hero_view`),
+ * incluidos los que se retiraron después del flop, así que no hace falta
+ * traer nada nuevo del backend. El o los ganadores (`winnersByPot`) van
+ * primero, para distinguirlos de un vistazo.
+ */
+export function deriveFlopReveal(actions, board, players, winnersByPot) {
+  if (!board?.flop) return null;
+  const foldedPreflop = new Set(
+    (actions || []).filter((a) => a.street === "preflop" && a.action === "fold").map((a) => a.seat),
+  );
+  const winnerSeats = new Set((winnersByPot || []).flatMap((pot) => pot.winners));
+  const reveal = (players || [])
+    .filter((p) => !foldedPreflop.has(p.seat) && p.hole_cards)
+    .map((p) => ({ seat: p.seat, name: p.name, cards: p.hole_cards, isWinner: winnerSeats.has(p.seat) }))
+    .sort((a, b) => Number(b.isWinner) - Number(a.isWinner));
+  return reveal.length > 0 ? reveal : null;
 }

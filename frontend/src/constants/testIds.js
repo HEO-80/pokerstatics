@@ -81,6 +81,15 @@ export const PLAY = {
   voiceToggleBtn: "play-voice-toggle-btn",
   coachAiStopSpeakingBtn: "play-coach-ai-stop-speaking-btn",
   stackModeToggleBtn: "play-stack-mode-toggle-btn",
+  activityCopyBtn: "play-activity-copy-btn",
+  coachCopyCurrentBtn: "play-coach-copy-current-btn",
+  coachCopyAllBtn: "play-coach-copy-all-btn",
+  coachAiCopyBtn: "play-coach-ai-copy-btn",
+  // Botones de copiar en las pantallas de fin de partida (Torneo: eliminado/
+  // ganaste/saliste — ver SessionCopyButtons.jsx), junto a sessionSummary.
+  sessionActivityCopyBtn: "play-session-activity-copy-btn",
+  sessionCoachCopyBtn: "play-session-coach-copy-btn",
+  sessionAiCopyBtn: "play-session-ai-copy-btn",
 };
 
 export const TOURNAMENT = {
