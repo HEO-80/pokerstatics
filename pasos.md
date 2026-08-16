@@ -422,7 +422,7 @@ markdown
 - ⬜ Glosario de términos (nit/tag/lag/station, +EV/-EV, etc.) pagina
 - ⬜ Orden de apuestas + re-raise mínimo (verificar reglas NLHE)
 - ⬜ Sombras / pulido visual de la UI (Sit&Go y demás pestañas: Stats, Review…)
--     cada juego de cada pagina tiene que tener su funcioinalidad correcta ahora tendriamos torneo y sitandgo faltan las otras revisar
+- ⬜ cada juego de cada pagina tiene que tener su funcioinalidad correcta ahora tendriamos torneo y sitandgo faltan las otras revisar
 
 
 ### APARCADO (cuando queramos)

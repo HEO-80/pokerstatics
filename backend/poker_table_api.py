@@ -62,6 +62,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 import poker_bot
+import preflop_charts
 from poker_coach import build_coach_response
 from poker_coach_ai import CoachAiConfigError, CoachAiError, ask_ai_coach
 from poker_engine import card_str
@@ -198,12 +199,22 @@ def _build_players(
 
 def _auto_advance_bots(hand: Hand, hero_seat: int, bot_profiles: Dict[int, str]) -> list:
     """Deja decidir a decide() a todos los bots hasta que le toque al hero o
-    la mano termine. Devuelve el tramo del actions_log generado en esta llamada."""
+    la mano termine. Devuelve el tramo del actions_log generado en esta llamada.
+
+    `preflop_charts.lookup()` (rangos reales de all_charts_master.json, ver
+    ese módulo) se consulta ANTES de cada decisión preflop: si hay cobertura
+    (stack efectivo <= 40bb y el spot es RFI o "enfrenta una subida simple",
+    ver su docstring) devuelve el `preflop_range` real de esa posición/stack
+    y `decide()` lo usa en vez de su heurística. Si devuelve None (sin
+    cobertura, stack profundo, o postflop) `decide()` se comporta EXACTAMENTE
+    como antes de este cableado — `preflop_range=None` es su valor por
+    defecto de siempre."""
     start = len(hand.actions_log)
     while not hand.is_complete and hand.current_seat is not None and hand.current_seat != hero_seat:
         seat = hand.current_seat
         profile = bot_profiles.get(seat, DEFAULT_BOT_PROFILE)
-        action, amount = poker_bot.decide(hand, seat, profile=profile)
+        preflop_range = preflop_charts.lookup(hand, seat)
+        action, amount = poker_bot.decide(hand, seat, profile=profile, preflop_range=preflop_range)
         hand.apply_action(seat, action, to_amount=amount)
     return hand.actions_log[start:]
 

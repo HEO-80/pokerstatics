@@ -228,33 +228,53 @@ def chen_strength(code: str) -> float:
 EARLY_MID_LABELS = ["UTG", "UTG1", "MP", "HJ", "CO"]
 
 
-def _seat_position_label(hand, seat: int) -> str | None:
+def _distribute_early_mid_label(seat: int, early_mid: list[int], labels: list[str]) -> str:
+    """Reparte los `k` asientos de `early_mid` (en orden de actuación, ya
+    resuelto por el caller) sobre `labels` (longitud fija) espaciándolos lo
+    más uniformemente posible — ver la tabla de ejemplos en el docstring de
+    `_seat_position_label` (con `EARLY_MID_LABELS`, 5 etiquetas) para el
+    caso de uso original; `backend/preflop_charts.py` reutiliza este mismo
+    reparto con las 5 etiquetas EP1/EP2/MP1/MP2/HJ del dataset de charts."""
+    k = len(early_mid)
+    j = early_mid.index(seat)
+    if k == 1:
+        idx = len(labels) - 1
+    else:
+        idx = round(j * (len(labels) - 1) / (k - 1))
+    return labels[idx]
+
+
+def _seat_position_label(
+    hand, seat: int, early_mid_labels: list[str] = EARLY_MID_LABELS, bb_label: str | None = None,
+) -> str | None:
     """Etiqueta de posición (clave de opening_ranges.json) para `seat` en
-    esta mano, o None si ese asiento es la BB (no tiene rango de apertura)."""
+    esta mano, o `bb_label` (None por defecto) si ese asiento es la BB (no
+    tiene rango de apertura).
+
+    `early_mid_labels`/`bb_label` son parámetros opcionales SOLO para que
+    `backend/preflop_charts.py` reutilice el mismo cálculo de asiento->orden
+    con sus propias 9 etiquetas (EP1/EP2/MP1/MP2/HJ/CO/BTN/SB/BB, que sí
+    necesita la BB con nombre propio para las cargas) sin duplicar esta
+    función — con los valores por defecto, el comportamiento es IDÉNTICO al
+    de siempre para todos los callers existentes (RFI de opening_ranges.json)."""
     seats = hand.seats
     n = len(seats)
     i = seats.index(hand.button_seat)
     order = seats[i:] + seats[:i]  # [BTN, SB, BB, UTG, ..., CO] horario desde el botón
 
     if n == 2:
-        return "SB" if seat == hand.button_seat else None
+        return "SB" if seat == hand.button_seat else bb_label
 
     btn, sb, bb = order[0], order[1], order[2]
     if seat == bb:
-        return None
+        return bb_label
     if seat == btn:
         return "BTN"
     if seat == sb:
         return "SB"
 
     early_mid = order[3:]
-    k = len(early_mid)
-    j = early_mid.index(seat)
-    if k == 1:
-        idx = len(EARLY_MID_LABELS) - 1
-    else:
-        idx = round(j * (len(EARLY_MID_LABELS) - 1) / (k - 1))
-    return EARLY_MID_LABELS[idx]
+    return _distribute_early_mid_label(seat, early_mid, early_mid_labels)
 
 
 _OPENING_RANGES_PATH = os.path.join(os.path.dirname(__file__), "data", "opening_ranges.json")
