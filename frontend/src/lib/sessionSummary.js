@@ -170,3 +170,70 @@ export function summarizeSession(coachAdviceLog) {
     patterns,
   };
 }
+
+// Body de POST /api/session/review (ver backend/poker_session_review.py) —
+// vuelca tal cual lo que el frontend YA tiene (handHistory + coachAdviceLog,
+// mismos datos que ya llenan las 3 tarjetas offline de SessionSummary.jsx),
+// solo convertido a snake_case (mismo criterio que ya usa lib/api.js para
+// /mtt/round). El backend NO recalcula el veredicto v1 de cada decisión —
+// aquí se manda ya resuelto con `decisionVerdict` (la MISMA función que usa
+// `summarizeSession` para las 3 tarjetas), así que la IA razona sobre
+// exactamente los mismos veredictos que el jugador ve en pantalla.
+export function buildSessionReviewPayload({ coachAdviceLog, handHistory, handsPlayed, resultLine }) {
+  const summary = summarizeSession(coachAdviceLog);
+
+  const hands = (handHistory || []).map((h) => ({
+    number: h.number,
+    level: h.level,
+    sb: h.sb,
+    bb: h.bb,
+    hero_cards: h.heroCards,
+    board: [h.board?.flop?.[0], h.board?.flop?.[1], h.board?.flop?.[2], h.board?.turn, h.board?.river].filter(
+      Boolean,
+    ),
+    actions: (h.actions || []).map((a) => ({
+      street: a.street,
+      name: a.name,
+      action: a.action,
+      amount: a.amount ?? null,
+      total: a.total ?? null,
+      is_hero: !!a.isHero,
+    })),
+    result_lines: h.result?.lines ?? [],
+    finished: !!h.finished,
+  }));
+
+  const decisions = (coachAdviceLog || []).map((entry) => ({
+    hand_number: entry.handNumber,
+    street: entry.street,
+    hero_cards: entry.heroCards,
+    board: entry.board ?? [],
+    pot_total: entry.potTotal,
+    to_call: entry.toCall,
+    recommendation: entry.recommendation
+      ? {
+          accion_sugerida: entry.recommendation.accion_sugerida,
+          es_marginal: !!entry.recommendation.es_marginal,
+          explicacion: entry.recommendation.explicacion ?? null,
+        }
+      : null,
+    hero_action: entry.heroAction,
+    hand_finished: !!entry.handFinished,
+    hero_won_hand: entry.heroWonHand,
+    verdict: decisionVerdict(entry),
+  }));
+
+  return {
+    hands_played: handsPlayed,
+    result_line: resultLine ?? null,
+    summary: {
+      total_decisions: summary.totalDecisionsWithData,
+      correct: summary.correct,
+      incorrect: summary.incorrect,
+      marginal: summary.marginal,
+      correct_pct: summary.correctPct,
+    },
+    hands,
+    decisions,
+  };
+}

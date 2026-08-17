@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from poker_analysis import analysis_router
 from poker_table_api import table_router
 from mtt_api import mtt_router
+from poker_session_review import session_review_router
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -225,6 +226,7 @@ app.include_router(api_router)
 app.include_router(analysis_router)
 app.include_router(table_router)
 app.include_router(mtt_router)
+app.include_router(session_review_router)
 
 app.add_middleware(
     CORSMiddleware,

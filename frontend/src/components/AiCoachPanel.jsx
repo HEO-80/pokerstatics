@@ -1,5 +1,6 @@
 import { AlertCircle, Loader2, Sparkles, Square } from "lucide-react";
 import { PLAY } from "@/constants/testIds";
+import AiMarkdown from "./AiMarkdown";
 
 /**
  * Panel "Coach IA" (v2) — se superpone sobre el hueco de Ayuda (ver
@@ -69,7 +70,7 @@ export default function AiCoachPanel({ canAsk, aiState, onAsk, speaking, onStopS
             <div className="text-[11px] uppercase tracking-widest text-[#c4b5fd] font-bold mb-1.5 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5" /> Análisis del coach (IA)
             </div>
-            <div className="text-[#E9D5FF] leading-relaxed whitespace-pre-line text-sm">{aiState.text}</div>
+            <AiMarkdown text={aiState.text} className="text-[#E9D5FF] leading-relaxed text-sm" />
             {speaking && (
               <button
                 type="button"

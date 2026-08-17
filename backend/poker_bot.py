@@ -666,6 +666,22 @@ def _hero_equity(hand, seat, iters, rng) -> float:
     return result["equity_pct"] / 100.0
 
 
+def _hero_equity_vs_range(hand, seat, iters, rng, range_codes) -> float:
+    """Como _hero_equity, pero contra un rango dado en vez de GENERIC_RANGE —
+    función separada (no una variante de _hero_equity) a propósito: los
+    tests de comportamiento postflop (test_poker_bot_aggregate.py) hacen
+    monkeypatch de _hero_equity para capturar "la" equity de cada decisión;
+    mezclar aquí la llamada con rango estrechado pisaría esa captura."""
+    player = hand.players[seat]
+    hero_cards = [card_str(c) for c in player.hole_cards]
+    board = [card_str(c) for c in hand.board]
+    result = equity_vs_range(
+        hero_cards, range_codes, board=board, iters=iters,
+        seed=rng.randrange(1_000_000_000),
+    )
+    return result["equity_pct"] / 100.0
+
+
 # Umbral de "ya es una guerra de resubidas" (Tarea 2, "NO all-ins random
 # con stack profundo"): fracción del stack EFECTIVO que hand.current_bet ya
 # representa. Por debajo, cada bot limita su PROPIA subida al 60% de su
@@ -756,6 +772,67 @@ def _postflop_bucket(equity, value_thresh):
     return "weak"
 
 
+# ---------------------------------------------------------------------------
+# Estrechado del rango del rival SOLO para decidir call/fold al enfrentar una
+# apuesta postflop (Tarea "arreglo de raíz del ace-high"): hasta aquí, la
+# equity que decidía pagar/foldear se medía SIEMPRE contra GENERIC_RANGE (las
+# 169 combinaciones al azar), sin importar cuánta agresión ya había mostrado
+# el rival en la mano — un ace-high sin proyecto "gana" ~51% en el flop y
+# ~37% en el river contra ese rango uniforme (MEDIDO con equity_vs_range),
+# suficiente para colarse en bucket "medium" (lag/station) o para superar el
+# colchón fijo de WEAK_FACING_BET_EXTRA_MARGIN con apuestas de tamaño chico —
+# de ahí que pague barriles con manos que en la práctica están muertas contra
+# el rango real de alguien que ha apostado 2-3 calles seguidas.
+#
+# Mismo método que ya usa poker_coach.estimate_villain_range (documentado
+# ahí): recortar GENERIC_RANGE a su top-X% por chen_strength — reimplementado
+# aquí en vez de importar poker_coach (que ya importa poker_bot; evita el
+# ciclo) y sin tocar ese módulo. A diferencia del coach (corte binario
+# raise=15%/call=40%/nada=100%), aquí se escalona por Nº DE BARRILES
+# postflop del rival relevante (flop/turn/river en los que subió/fue all-in)
+# porque un solo cbet no dice casi nada (rango típico ancho) pero 2-3
+# barriles seguidos sí narrows de verdad — números MEDIDOS con
+# equity_vs_range sobre board seco (ver tarea): 1 barril top 55% (ace-high
+# ~48% equity, sigue vivo), 2 barriles top 30% (~25%), 3+ barriles top 15%
+# (~9%, coincide con el RAISE_RANGE_PCT del coach para "el rival subió").
+FACING_BARREL_RANGE_PCT = {1: 0.55, 2: 0.30, 3: 0.15}
+
+_CHEN_SORTED_CODES = sorted(GENERIC_RANGE, key=chen_strength, reverse=True)
+
+
+def _top_pct_chen_range(pct: float) -> list[str]:
+    n = max(1, round(len(_CHEN_SORTED_CODES) * pct))
+    return _CHEN_SORTED_CODES[:n]
+
+
+def _villain_barrel_count(hand, villain_seat) -> int:
+    """Nº de calles POSTFLOP distintas (flop/turn/river) en las que
+    `villain_seat` subió o fue all-in en esta mano — preflop no cuenta
+    (fuera de alcance, no se toca la defensa de ciegas ni las 3bet/4bet)."""
+    postflop_streets = {"flop", "turn", "river"}
+    streets = {
+        a["street"] for a in hand.actions_log
+        if a["seat"] == villain_seat and a["street"] in postflop_streets
+        and a["action"] in ("raise", "all_in")
+    }
+    return len(streets)
+
+
+def _narrowed_range_for_facing_bet(hand) -> list[str]:
+    """Rango del rival para la decisión call/fold al enfrentar una apuesta —
+    ver docstring de arriba. Sin agresor identificable (edge case: all-in
+    corto que no reabre la ronda, ver _apply_raise_like en poker_table.py),
+    se cae de vuelta a GENERIC_RANGE = comportamiento de hoy, sin narrowing."""
+    villain_seat = hand.last_aggressor_seat
+    if villain_seat is None:
+        return GENERIC_RANGE
+    barrels = _villain_barrel_count(hand, villain_seat)
+    pct = FACING_BARREL_RANGE_PCT.get(min(barrels, 3), 1.0)
+    if pct >= 1.0:
+        return GENERIC_RANGE
+    return _top_pct_chen_range(pct)
+
+
 def _postflop_decision(hand, seat, profile, iters, rng) -> tuple:
     params = PROFILE_PARAMS[profile]
     player = hand.players[seat]
@@ -791,11 +868,25 @@ def _postflop_decision(hand, seat, profile, iters, rng) -> tuple:
     if bucket == "strong" and "raise" in legal and may_keep_raising:
         return _size_postflop_bet(hand, seat, legal, profile, rng, size_boost=STRONG_VALUE_SIZE_BOOST)
 
+    # Call/fold: para nit/tag/lag, mide la equity contra el rango del rival
+    # ESTRECHADO por su agresión en la mano (ver _narrowed_range_for_facing_bet)
+    # en vez de GENERIC_RANGE — station queda fuera a propósito, sigue
+    # pagando ligero tal cual hoy (su call_margin=0.25 ya es su rasgo).
+    if profile == "station":
+        facing_equity, facing_bucket = equity, bucket
+    else:
+        facing_range = _narrowed_range_for_facing_bet(hand)
+        if facing_range is GENERIC_RANGE:
+            facing_equity, facing_bucket = equity, bucket
+        else:
+            facing_equity = _hero_equity_vs_range(hand, seat, iters, rng, facing_range)
+            facing_bucket = _postflop_bucket(facing_equity, params["value_thresh"])
+
     pot_before = hand.pot_total()
     required = pot_odds(to_call, pot_before)["required_equity_pct"] / 100.0
-    if bucket == "weak" and profile != "station":
+    if facing_bucket == "weak" and profile != "station":
         required += WEAK_FACING_BET_EXTRA_MARGIN
-    if equity + params["call_margin"] >= required:
+    if facing_equity + params["call_margin"] >= required:
         return ("call", None)
 
     if rng.random() < bluff_p * 0.5 and "raise" in legal and may_keep_raising:

@@ -90,6 +90,11 @@ export const PLAY = {
   sessionActivityCopyBtn: "play-session-activity-copy-btn",
   sessionCoachCopyBtn: "play-session-coach-copy-btn",
   sessionAiCopyBtn: "play-session-ai-copy-btn",
+  // Análisis IA de la SESIÓN completa (POST /api/session/review, bajo
+  // demanda desde las pantallas de fin de partida — ver SessionAiReview.jsx),
+  // distinto del Coach IA por mano (coachAiBtn/coachAiSection de arriba).
+  sessionAiReviewBtn: "play-session-ai-review-btn",
+  sessionAiReviewSection: "play-session-ai-review-section",
 };
 
 export const TOURNAMENT = {

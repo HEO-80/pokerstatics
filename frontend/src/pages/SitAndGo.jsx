@@ -3,6 +3,7 @@ import { Crown, RotateCw, LogOut, Skull, Trophy } from "lucide-react";
 import HandTable from "@/components/HandTable";
 import ActivityLog from "@/components/ActivityLog";
 import SessionSummary from "@/components/SessionSummary";
+import SessionAiReview from "@/components/SessionAiReview";
 import { createTableHand } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
@@ -432,84 +433,114 @@ export default function SitAndGo() {
           {phase === "exited" && (
             <div
               data-testid={SITANDGO.exitedScreen}
-              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
+              className="mt-10 glass-panel rounded-2xl p-10 max-w-5xl mx-auto"
             >
-              <LogOut className="w-16 h-16 text-[#94A3B8] mx-auto mb-4" />
-              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-                Has salido del Sit &amp; Go
+              <div className="text-center max-w-lg mx-auto">
+                <LogOut className="w-16 h-16 text-[#94A3B8] mx-auto mb-4" />
+                <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                  Has salido del Sit &amp; Go
+                </div>
+                <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
               </div>
-              <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
-              <div className="mb-6 text-left">
+              <div className="mb-6">
                 <SessionSummary
                   coachAdviceLog={coachAdviceLog}
                   handsPlayed={handHistory.length}
                   resultLine={`Saliste con ${heroStack} fichas · quedaban ${survivorsLeft}/${TOTAL_SEATS}`}
                   totalPoints={pointsProgress.totalPoints}
                 />
+                <SessionAiReview
+                  coachAdviceLog={coachAdviceLog}
+                  handHistory={handHistory}
+                  handsPlayed={handHistory.length}
+                  resultLine={`Saliste con ${heroStack} fichas · quedaban ${survivorsLeft}/${TOTAL_SEATS}`}
+                />
               </div>
-              <button
-                data-testid={SITANDGO.backToLobbyBtn}
-                onClick={backToLobby}
-                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-              >
-                <RotateCw className="w-4 h-4" /> Volver al lobby
-              </button>
+              <div className="text-center">
+                <button
+                  data-testid={SITANDGO.backToLobbyBtn}
+                  onClick={backToLobby}
+                  className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+                >
+                  <RotateCw className="w-4 h-4" /> Volver al lobby
+                </button>
+              </div>
             </div>
           )}
 
           {phase === "busted" && (
             <div
               data-testid={SITANDGO.bustedScreen}
-              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
+              className="mt-10 glass-panel rounded-2xl p-10 max-w-5xl mx-auto"
             >
-              <Skull className="w-16 h-16 text-[#EF4444] mx-auto mb-4" />
-              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-                Has quedado en posición {finalPosition}
+              <div className="text-center max-w-lg mx-auto">
+                <Skull className="w-16 h-16 text-[#EF4444] mx-auto mb-4" />
+                <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                  Has quedado en posición {finalPosition}
+                </div>
+                <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
               </div>
-              <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
-              <div className="mb-6 text-left">
+              <div className="mb-6">
                 <SessionSummary
                   coachAdviceLog={coachAdviceLog}
                   handsPlayed={handHistory.length}
                   resultLine={`Posición ${finalPosition} de ${TOTAL_SEATS}`}
                   totalPoints={pointsProgress.totalPoints}
                 />
+                <SessionAiReview
+                  coachAdviceLog={coachAdviceLog}
+                  handHistory={handHistory}
+                  handsPlayed={handHistory.length}
+                  resultLine={`Posición ${finalPosition} de ${TOTAL_SEATS}`}
+                />
               </div>
-              <button
-                data-testid={SITANDGO.backToLobbyBtn}
-                onClick={backToLobby}
-                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-              >
-                <RotateCw className="w-4 h-4" /> Volver al lobby
-              </button>
+              <div className="text-center">
+                <button
+                  data-testid={SITANDGO.backToLobbyBtn}
+                  onClick={backToLobby}
+                  className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+                >
+                  <RotateCw className="w-4 h-4" /> Volver al lobby
+                </button>
+              </div>
             </div>
           )}
 
           {phase === "won" && (
             <div
               data-testid={SITANDGO.wonScreen}
-              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto glow-correct"
+              className="mt-10 glass-panel rounded-2xl p-10 max-w-5xl mx-auto glow-correct"
             >
-              <Trophy className="w-16 h-16 text-[#F59E0B] mx-auto mb-4" />
-              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-                ¡Has ganado el Sit &amp; Go!
+              <div className="text-center max-w-lg mx-auto">
+                <Trophy className="w-16 h-16 text-[#F59E0B] mx-auto mb-4" />
+                <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                  ¡Has ganado el Sit &amp; Go!
+                </div>
+                <div className="text-[#94A3B8] mb-6">Te quedaste con todas las fichas de la mesa.</div>
               </div>
-              <div className="text-[#94A3B8] mb-6">Te quedaste con todas las fichas de la mesa.</div>
-              <div className="mb-6 text-left">
+              <div className="mb-6">
                 <SessionSummary
                   coachAdviceLog={coachAdviceLog}
                   handsPlayed={handHistory.length}
                   resultLine="¡Ganaste el Sit&Go!"
                   totalPoints={pointsProgress.totalPoints}
                 />
+                <SessionAiReview
+                  coachAdviceLog={coachAdviceLog}
+                  handHistory={handHistory}
+                  handsPlayed={handHistory.length}
+                  resultLine="¡Ganaste el Sit&Go!"
+                />
               </div>
-              <button
-                data-testid={SITANDGO.backToLobbyBtn}
-                onClick={backToLobby}
-                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-              >
-                <RotateCw className="w-4 h-4" /> Volver al lobby
-              </button>
+              <div className="text-center">
+                <button
+                  data-testid={SITANDGO.backToLobbyBtn}
+                  onClick={backToLobby}
+                  className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+                >
+                  <RotateCw className="w-4 h-4" /> Volver al lobby
+                </button>
+              </div>
             </div>
           )}
         </div>

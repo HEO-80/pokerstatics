@@ -10,6 +10,12 @@ import { PLAY, POINTS } from "@/constants/testIds";
  * Ganaste) de Torneo/Sit&Go — Práctica no tiene una pantalla de "fin de
  * partida" análoga, así que no se usa ahí.
  *
+ * Layout: 3 tarjetas en una grid (1 columna en móvil, 3 en desktop) con el
+ * MISMO contenido que antes vivía en una sola tarjeta — "Resumen de la
+ * partida" / "Resultado vs. decisión" / "Puntos y patrones". Todo sale de
+ * `summarizeSession` (v1, sin red) + los props de puntos: no depende de la
+ * valoración IA, que vive aparte (ver SessionCopyButtons).
+ *
  * `handsPlayed`/`resultLine` son contexto que solo la página conoce (nº de
  * manos del historial, posición final, etc.) — este componente no decide
  * nada de eso, solo lo muestra junto a la valoración de decisiones.
@@ -46,31 +52,35 @@ export default function SessionSummary({ coachAdviceLog, handsPlayed, resultLine
   }
 
   return (
-    <div data-testid={PLAY.sessionSummary} className="glass-panel rounded-xl p-4 text-left text-sm space-y-3">
-      <div className="text-[10px] uppercase tracking-widest text-[#475569]">Resumen de la partida</div>
+    <div data-testid={PLAY.sessionSummary} className="grid grid-cols-1 md:grid-cols-3 gap-4 text-left text-sm items-start">
+      {/* Tarjeta 1: Resumen de la partida */}
+      <div className="glass-panel rounded-xl p-4 space-y-3">
+        <div className="text-[10px] uppercase tracking-widest text-[#475569]">Resumen de la partida</div>
 
-      <div className="text-[#94A3B8]">
-        {handsWord}
-        {resultLine ? ` · ${resultLine}` : ""}.
+        <div className="text-[#94A3B8]">
+          {handsWord}
+          {resultLine ? ` · ${resultLine}` : ""}.
+        </div>
+
+        <div className="text-white leading-relaxed">
+          Tomaste <strong>{summary.totalDecisionsWithData}</strong> decisiones con datos suficientes del coach:{" "}
+          <strong className="text-[#10B981]">{summary.correct}</strong> coincidieron con la recomendación
+          matemática (+EV) y <strong className="text-[#EF4444]">{summary.incorrect}</strong> no
+          {summary.marginal > 0 ? `, y ${summary.marginal} más fueron marginales (sin un veredicto claro).` : "."}
+          {summary.correctPct != null && (
+            <>
+              {" "}
+              Acierto sobre las decisiones no marginales: <strong>{summary.correctPct}%</strong>.
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="text-white leading-relaxed">
-        Tomaste <strong>{summary.totalDecisionsWithData}</strong> decisiones con datos suficientes del coach:{" "}
-        <strong className="text-[#10B981]">{summary.correct}</strong> coincidieron con la recomendación
-        matemática (+EV) y <strong className="text-[#EF4444]">{summary.incorrect}</strong> no
-        {summary.marginal > 0 ? `, y ${summary.marginal} más fueron marginales (sin un veredicto claro).` : "."}
-        {summary.correctPct != null && (
-          <>
-            {" "}
-            Acierto sobre las decisiones no marginales: <strong>{summary.correctPct}%</strong>.
-          </>
-        )}
-      </div>
-
-      {summary.notableHands.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="text-[10px] uppercase tracking-widest text-[#475569]">Resultado vs. decisión</div>
-          {summary.notableHands.map((h) => (
+      {/* Tarjeta 2: Resultado vs. decisión */}
+      <div className="glass-panel rounded-xl p-4 space-y-1.5">
+        <div className="text-[10px] uppercase tracking-widest text-[#475569]">Resultado vs. decisión</div>
+        {summary.notableHands.length > 0 ? (
+          summary.notableHands.map((h) => (
             <div key={h.handNumber} className={h.noteType === "wonWithBadDecision" ? "text-[#F59E0B]" : "text-[#94A3B8]"}>
               <strong>
                 Mano {h.handNumber} de {handsPlayed}
@@ -80,43 +90,52 @@ export default function SessionSummary({ coachAdviceLog, handsPlayed, resultLine
                 ? "ganaste el bote, pero la decisión era -EV según el coach — salió bien esta vez; a largo plazo, ese tipo de jugada pierde."
                 : "perdiste el bote, pero la decisión era +EV según el coach — buena decisión, aunque esa mano en concreto se perdiera."}
             </div>
-          ))}
-        </div>
-      )}
-
-      {hasPointsData && (
-        <div data-testid={POINTS.sessionBlock} className="space-y-1 pt-1.5 border-t border-white/8">
-          <div className="text-[10px] uppercase tracking-widest text-[#475569]">Puntos de esta partida</div>
-          <div className="text-white">
-            <strong className={sessionScore.totalPoints >= 0 ? "text-[#10B981]" : "text-[#EF4444]"}>
-              {sessionScore.totalPoints >= 0 ? "+" : ""}
-              {Math.round(sessionScore.totalPoints)}
-            </strong>{" "}
-            puntos por calidad de decisión
-            {sessionScore.bestStreak >= 2 ? ` · mejor racha: ${sessionScore.bestStreak} aciertos seguidos` : ""}.
-          </div>
+          ))
+        ) : (
           <div className="text-[#94A3B8]">
-            Nivel <strong className="text-white">{levelAfter}</strong> ·{" "}
-            <strong className="text-white">{Math.round(totalPoints)}</strong> puntos acumulados en total.
+            Ninguna mano se desvió entre resultado y decisión: ganaste con +EV o perdiste con -EV siempre que hubo veredicto.
           </div>
-          {leveledUp && (
-            <div data-testid={POINTS.levelUpNote} className="text-[#F59E0B] font-bold">
-              ¡Subiste de nivel {levelBefore} a {levelAfter} en esta partida!
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
-      {summary.patterns.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-[10px] uppercase tracking-widest text-[#475569]">Patrón en tus fallos</div>
-          {summary.patterns.map((p, i) => (
-            <div key={i} className="text-[#94A3B8]">
-              {p}
+      {/* Tarjeta 3: Puntos y patrones */}
+      <div className="glass-panel rounded-xl p-4 space-y-3">
+        <div className="text-[10px] uppercase tracking-widest text-[#475569]">Puntos y patrones</div>
+
+        {hasPointsData ? (
+          <div data-testid={POINTS.sessionBlock} className="space-y-1">
+            <div className="text-white">
+              <strong className={sessionScore.totalPoints >= 0 ? "text-[#10B981]" : "text-[#EF4444]"}>
+                {sessionScore.totalPoints >= 0 ? "+" : ""}
+                {Math.round(sessionScore.totalPoints)}
+              </strong>{" "}
+              puntos por calidad de decisión
+              {sessionScore.bestStreak >= 2 ? ` · mejor racha: ${sessionScore.bestStreak} aciertos seguidos` : ""}.
             </div>
-          ))}
-        </div>
-      )}
+            <div className="text-[#94A3B8]">
+              Nivel <strong className="text-white">{levelAfter}</strong> ·{" "}
+              <strong className="text-white">{Math.round(totalPoints)}</strong> puntos acumulados en total.
+            </div>
+            {leveledUp && (
+              <div data-testid={POINTS.levelUpNote} className="text-[#F59E0B] font-bold">
+                ¡Subiste de nivel {levelBefore} a {levelAfter} en esta partida!
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-[#94A3B8]">Sin puntos que mostrar para esta partida.</div>
+        )}
+
+        {summary.patterns.length > 0 && (
+          <div className={`space-y-1 ${hasPointsData ? "pt-1.5 border-t border-white/8" : ""}`}>
+            {summary.patterns.map((p, i) => (
+              <div key={i} className="text-[#94A3B8]">
+                {p}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import HandTable from "@/components/HandTable";
 import ActivityLog from "@/components/ActivityLog";
 import SessionSummary from "@/components/SessionSummary";
 import SessionCopyButtons from "@/components/SessionCopyButtons";
+import SessionAiReview from "@/components/SessionAiReview";
 import TournamentRankingPanel from "@/components/TournamentRankingPanel";
 import TournamentStatsBar from "@/components/TournamentStatsBar";
 import { createTableHand, simulateMttRound } from "@/lib/api";
@@ -652,123 +653,153 @@ export default function Tournament() {
           {phase === "eliminated" && (
             <div
               data-testid={TOURNAMENT.eliminatedScreen}
-              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
+              className="mt-10 glass-panel rounded-2xl p-10 max-w-5xl mx-auto"
             >
-              <Skull className="w-16 h-16 text-[#EF4444] mx-auto mb-4" />
-              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-                Puesto {finalPosition} de {config?.totalEntrants}
-              </div>
-              {payoutStructure && (
-                <div data-testid={TOURNAMENT.finalPrize} className="mb-2 font-display font-bold uppercase tracking-wide">
-                  {finalPositionInMoney ? (
-                    <span className="text-[#F59E0B]">Premio: {finalPrize.toLocaleString("es-ES")}</span>
-                  ) : (
-                    <span className="text-[#475569]">
-                      Sin premio (puesto {finalPosition}, premios hasta el {payoutStructure.paidPlaces})
-                    </span>
-                  )}
+              <div className="text-center max-w-lg mx-auto">
+                <Skull className="w-16 h-16 text-[#EF4444] mx-auto mb-4" />
+                <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                  Puesto {finalPosition} de {config?.totalEntrants}
                 </div>
-              )}
-              <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
-              <div className="mb-4">
-                <SessionCopyButtons
-                  handHistory={handHistory}
-                  coachAdviceLog={coachAdviceLog}
-                  aiByEntryId={aiByEntryId}
-                />
+                {payoutStructure && (
+                  <div data-testid={TOURNAMENT.finalPrize} className="mb-2 font-display font-bold uppercase tracking-wide">
+                    {finalPositionInMoney ? (
+                      <span className="text-[#F59E0B]">Premio: {finalPrize.toLocaleString("es-ES")}</span>
+                    ) : (
+                      <span className="text-[#475569]">
+                        Sin premio (puesto {finalPosition}, premios hasta el {payoutStructure.paidPlaces})
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="text-[#94A3B8] mb-6">Te quedaste sin fichas. Buena suerte la próxima.</div>
+                <div className="mb-4">
+                  <SessionCopyButtons
+                    handHistory={handHistory}
+                    coachAdviceLog={coachAdviceLog}
+                    aiByEntryId={aiByEntryId}
+                  />
+                </div>
               </div>
-              <div className="mb-6 text-left">
+              <div className="mb-6">
                 <SessionSummary
                   coachAdviceLog={coachAdviceLog}
                   handsPlayed={handHistory.length}
                   resultLine={`Puesto ${finalPosition} de ${config?.totalEntrants}`}
                   totalPoints={pointsProgress.totalPoints}
                 />
+                <SessionAiReview
+                  coachAdviceLog={coachAdviceLog}
+                  handHistory={handHistory}
+                  handsPlayed={handHistory.length}
+                  resultLine={`Puesto ${finalPosition} de ${config?.totalEntrants}`}
+                />
               </div>
-              <button
-                data-testid={TOURNAMENT.newTournamentBtn}
-                onClick={backToLobby}
-                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-              >
-                <RotateCw className="w-4 h-4" /> Empezar otro torneo
-              </button>
+              <div className="text-center">
+                <button
+                  data-testid={TOURNAMENT.newTournamentBtn}
+                  onClick={backToLobby}
+                  className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+                >
+                  <RotateCw className="w-4 h-4" /> Empezar otro torneo
+                </button>
+              </div>
             </div>
           )}
 
           {phase === "won" && (
             <div
               data-testid={TOURNAMENT.wonScreen}
-              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto glow-correct"
+              className="mt-10 glass-panel rounded-2xl p-10 max-w-5xl mx-auto glow-correct"
             >
-              <Trophy className="w-16 h-16 text-[#F59E0B] mx-auto mb-4" />
-              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-                ¡Has ganado el torneo!
-              </div>
-              {payoutStructure && (
-                <div data-testid={TOURNAMENT.finalPrize} className="mb-2 font-display font-bold uppercase tracking-wide text-[#F59E0B]">
-                  Premio: {winnerPrize.toLocaleString("es-ES")}
+              <div className="text-center max-w-lg mx-auto">
+                <Trophy className="w-16 h-16 text-[#F59E0B] mx-auto mb-4" />
+                <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                  ¡Has ganado el torneo!
                 </div>
-              )}
-              <div className="text-[#94A3B8] mb-6">
-                Te impusiste a los {config?.totalEntrants} inscritos hasta quedarte con todas las fichas.
+                {payoutStructure && (
+                  <div data-testid={TOURNAMENT.finalPrize} className="mb-2 font-display font-bold uppercase tracking-wide text-[#F59E0B]">
+                    Premio: {winnerPrize.toLocaleString("es-ES")}
+                  </div>
+                )}
+                <div className="text-[#94A3B8] mb-6">
+                  Te impusiste a los {config?.totalEntrants} inscritos hasta quedarte con todas las fichas.
+                </div>
+                <div className="mb-4">
+                  <SessionCopyButtons
+                    handHistory={handHistory}
+                    coachAdviceLog={coachAdviceLog}
+                    aiByEntryId={aiByEntryId}
+                  />
+                </div>
               </div>
-              <div className="mb-4">
-                <SessionCopyButtons
-                  handHistory={handHistory}
-                  coachAdviceLog={coachAdviceLog}
-                  aiByEntryId={aiByEntryId}
-                />
-              </div>
-              <div className="mb-6 text-left">
+              <div className="mb-6">
                 <SessionSummary
                   coachAdviceLog={coachAdviceLog}
                   handsPlayed={handHistory.length}
                   resultLine={`¡Ganaste el torneo de ${config?.totalEntrants}!`}
                   totalPoints={pointsProgress.totalPoints}
                 />
+                <SessionAiReview
+                  coachAdviceLog={coachAdviceLog}
+                  handHistory={handHistory}
+                  handsPlayed={handHistory.length}
+                  resultLine={`¡Ganaste el torneo de ${config?.totalEntrants}!`}
+                />
               </div>
-              <button
-                data-testid={TOURNAMENT.newTournamentBtn}
-                onClick={backToLobby}
-                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-              >
-                <RotateCw className="w-4 h-4" /> Empezar otro torneo
-              </button>
+              <div className="text-center">
+                <button
+                  data-testid={TOURNAMENT.newTournamentBtn}
+                  onClick={backToLobby}
+                  className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+                >
+                  <RotateCw className="w-4 h-4" /> Empezar otro torneo
+                </button>
+              </div>
             </div>
           )}
 
           {phase === "exited" && (
             <div
               data-testid={TOURNAMENT.exitedScreen}
-              className="mt-10 glass-panel rounded-2xl p-10 text-center max-w-lg mx-auto"
+              className="mt-10 glass-panel rounded-2xl p-10 max-w-5xl mx-auto"
             >
-              <LogOut className="w-16 h-16 text-[#94A3B8] mx-auto mb-4" />
-              <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
-                Has salido del torneo
+              <div className="text-center max-w-lg mx-auto">
+                <LogOut className="w-16 h-16 text-[#94A3B8] mx-auto mb-4" />
+                <div className="font-display font-bold text-3xl uppercase tracking-tight text-white mb-2">
+                  Has salido del torneo
+                </div>
+                <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
+                <div className="mb-4">
+                  <SessionCopyButtons
+                    handHistory={handHistory}
+                    coachAdviceLog={coachAdviceLog}
+                    aiByEntryId={aiByEntryId}
+                  />
+                </div>
               </div>
-              <div className="text-[#94A3B8] mb-6">Puedes repasar cómo jugaste antes de volver al lobby.</div>
-              <div className="mb-4">
-                <SessionCopyButtons
-                  handHistory={handHistory}
-                  coachAdviceLog={coachAdviceLog}
-                  aiByEntryId={aiByEntryId}
-                />
-              </div>
-              <div className="mb-6 text-left">
+              <div className="mb-6">
                 <SessionSummary
                   coachAdviceLog={coachAdviceLog}
                   handsPlayed={handHistory.length}
                   resultLine={`Saliste con ${heroStack} fichas · quedaban ${remaining}/${config?.totalEntrants}`}
                   totalPoints={pointsProgress.totalPoints}
                 />
+                <SessionAiReview
+                  coachAdviceLog={coachAdviceLog}
+                  handHistory={handHistory}
+                  handsPlayed={handHistory.length}
+                  resultLine={`Saliste con ${heroStack} fichas · quedaban ${remaining}/${config?.totalEntrants}`}
+                />
               </div>
-              <button
-                data-testid={TOURNAMENT.backToLobbyBtn}
-                onClick={backToLobby}
-                className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
-              >
-                <RotateCw className="w-4 h-4" /> Volver al lobby
-              </button>
+              <div className="text-center">
+                <button
+                  data-testid={TOURNAMENT.backToLobbyBtn}
+                  onClick={backToLobby}
+                  className="px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2"
+                >
+                  <RotateCw className="w-4 h-4" /> Volver al lobby
+                </button>
+              </div>
             </div>
           )}
         </div>

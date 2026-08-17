@@ -73,6 +73,17 @@ export async function fetchTableCoachAi(handId, villainStyle) {
   return data;
 }
 
+// Análisis IA de la SESIÓN completa (poker_session_review.py), bajo demanda
+// desde el botón "Análisis IA de la sesión" en las pantallas de fin de
+// partida (ver lib/sessionReview.js para cómo se arma `payload` a partir de
+// handHistory + coachAdviceLog — mismo criterio de solo-bajo-demanda que
+// fetchTableCoachAi). Stateless, como /mtt/round: el frontend manda toda la
+// sesión ya jugada en el body, el backend no guarda nada entre llamadas.
+export async function fetchSessionReview(payload) {
+  const { data } = await client.post("/session/review", payload);
+  return data;
+}
+
 // ----------------- Torneo MTT (Tournament.jsx) -----------------
 
 /**
