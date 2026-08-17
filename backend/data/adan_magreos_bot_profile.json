@@ -1,0 +1,45 @@
+{
+  "_meta": {
+    "persona_name": "Adán Magreos",
+    "nota_importante": "Perfil de bot INSPIRADO en un pro real, con NOMBRE FICTICIO. SOLO para pruebas privadas de Hector; quitar (o renombrar) en la versión pública. Es una APROXIMACIÓN de su estilo, NO un clon: reproduce tendencias, no sus rangos exactos.",
+    "uso": "Esto es una ESPEC de comportamiento, no parámetros listos. Claude Code debe TRADUCIRLA a los parámetros reales del sistema de perfiles de poker_bot.py (nit/tag/lag/station y sus campos: value_thresh, bluff_freq, call_margin, etc. — usar los que EXISTAN, no inventar campos). Partir del perfil 'lag' como base y moverlo hacia estas tendencias. El bot debe seguir usando el cableado de rangos reales (preflop_charts) para las respuestas en fase corta, y mantener el narrowing por barriles ya implementado (no volver a pagar ligero con ace-high).",
+    "aviso": "Antes de implementar, que Claude Code reporte a qué parámetros reales mapea cada tendencia y espere OK, para no descalibrar los otros perfiles."
+  },
+
+  "base_profile": "lag",
+  "display_name": "Adán Magreos",
+
+  "tendencias": {
+    "preflop": {
+      "vpip": "Alto, sobre todo en mesa corta (5-6 jugadores): abre y 3-betea con más frecuencia que un tag.",
+      "resteal_corto": "Con stack corto (~8-15bb) hace all-in de rerobo AMPLIO: pares medios y manos tipo 97o/J9, no solo premiums.",
+      "inducir_medio": "Con stack medio (30-80bb) y mano fuerte, tiende al 3-bet SIN all-in (inductivo) en vez de cerrar la mano.",
+      "usa_rangos_cableados": "En fase corta (<=40bb) sigue usando los charts reales de preflop_charts para RFI y respuestas."
+    },
+    "postflop": {
+      "cbet": "C-bet frecuente, con tamaño PEQUEÑO cuando tiene ventaja de rango en board seco.",
+      "barrel": "Barrilea con equity + potencial (proyectos/bloqueadores), no faroles vacíos.",
+      "pot_control": "Con manos medias controla el tamaño del bote; con manos muy fuertes busca inflarlo.",
+      "castiga_regs": "Tiende a check-raise contra rivales que apuestan de más (c-bet demasiado).",
+      "no_sobrefarolea": "No va grande de farol si no tiene suficientes combos de farol.",
+      "respeta_agresion": "NO paga ligero sin sentido: mantener el narrowing por barriles ya implementado (ace-high foldea ante presión)."
+    },
+    "por_profundidad": {
+      "corto": "Push/fold agresivo + consciencia de ICM/saltos de premio.",
+      "medio": "Inducir (3bet-no-allin), squeeze, robar aprovechando imagen.",
+      "profundo": "Más control de bote, menos spew, cuidado en multiway (presión fuerte de varios -> fold)."
+    },
+    "sizing": {
+      "por_textura": "Pequeño (1/4-1/3) en board seco / con ventaja de rango; medio (1/2-2/3) estándar; grande (3/4+) en boards conectados o para presionar.",
+      "neutro_si_duda": "Medio bote cuando el tamaño ideal no está claro."
+    }
+  },
+
+  "notas_de_implementacion": [
+    "Base: perfil 'lag' existente; subir agresión/VPIP especialmente en mesa corta.",
+    "NO tocar los otros perfiles (nit/tag/lag/station) ni la calibración multiway/buckets/farol al añadir este.",
+    "Mantener intacto el narrowing por barriles (Adán no debe pagar ligero con ace-high).",
+    "Es aproximación, no clon: si algún matiz no cabe en los parámetros existentes, dejarlo fuera antes que forzar el sistema.",
+    "El nombre 'Adán Magreos' debe ser fácilmente quitable/renombrable para la versión final."
+  ]
+}

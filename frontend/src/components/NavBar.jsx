@@ -1,6 +1,7 @@
 import { Link, NavLink } from "react-router-dom";
 import { Spade, LayoutDashboard, RotateCcw, Upload, Home, Gamepad2, Swords, Crown } from "lucide-react";
 import { NAV } from "@/constants/testIds";
+import AuthPanel from "@/components/AuthPanel";
 
 // Pestaña activa estilo "carpeta": borde inferior de color + fondo tintado,
 // en vez de solo un fondo plano — así se lee de un vistazo en qué página
@@ -82,6 +83,8 @@ export default function NavBar({ stats = null }) {
               </div>
             </div>
           </Link>
+
+          <AuthPanel />
 
           <nav className="flex items-center gap-2">
             <NavLink

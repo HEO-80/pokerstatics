@@ -6,6 +6,10 @@ export const API = `${BACKEND_URL}/api`;
 const client = axios.create({
   baseURL: API,
   headers: { "Content-Type": "application/json" },
+  // La sesión vive en una cookie httpOnly (ver backend/auth_api.py) — sin
+  // esto, axios no la manda ni la guarda en requests cross-origin (frontend
+  // y backend corren en puertos distintos), y el login parecería no "pegar".
+  withCredentials: true,
 });
 
 export async function fetchScenariosStats() {
@@ -100,4 +104,36 @@ export async function simulateMttRound({ totalEntrants, remainingTotal, fieldPoo
     hero_stack: heroStack ?? null,
   });
   return data;
+}
+
+// ----------------- Auth (paso 1: solo login, ver backend/auth_api.py) -----
+
+export async function registerUser({ name, email, password }) {
+  const { data } = await client.post("/auth/register", { name, email, password });
+  return data;
+}
+
+export async function loginUser({ email, password }) {
+  const { data } = await client.post("/auth/login", { email, password });
+  return data;
+}
+
+// `credential`: ID token que devuelve el botón de Google Identity Services
+// (ver hooks/useAuth.js / components/AuthPanel.jsx) — el backend lo verifica
+// contra Google, el frontend nunca lo interpreta.
+export async function loginWithGoogle(credential) {
+  const { data } = await client.post("/auth/google", { credential });
+  return data;
+}
+
+export async function logoutUser() {
+  const { data } = await client.post("/auth/logout");
+  return data;
+}
+
+// Nunca lanza por "no logueado" (el backend devuelve 200 con user:null a
+// propósito, ver auth_api.py) — el login es opcional, no un muro.
+export async function fetchMe() {
+  const { data } = await client.get("/auth/me");
+  return data.user;
 }

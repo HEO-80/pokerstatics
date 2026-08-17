@@ -1,27 +1,19 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Query
-from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import random
-from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Optional, Union, Any
 import uuid
 from datetime import datetime, timezone
 
+from db import client, db
 from poker_analysis import analysis_router
 from poker_table_api import table_router
 from mtt_api import mtt_router
 from poker_session_review import session_review_router
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+from auth_api import auth_router
 
 app = FastAPI(title="Preflop Poker Trainer API")
 api_router = APIRouter(prefix="/api")
@@ -227,6 +219,7 @@ app.include_router(analysis_router)
 app.include_router(table_router)
 app.include_router(mtt_router)
 app.include_router(session_review_router)
+app.include_router(auth_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -241,6 +234,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+@app.on_event("startup")
+async def ensure_indexes():
+    await db.users.create_index("email", unique=True)
 
 
 @app.on_event("shutdown")

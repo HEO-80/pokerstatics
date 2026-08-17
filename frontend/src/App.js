@@ -3,6 +3,7 @@ import { useState } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import NavBar from "@/components/NavBar";
 import { NavBarStatsSetterProvider } from "@/hooks/useNavBarStats";
+import { AuthProvider } from "@/hooks/useAuth";
 import Home from "@/pages/Home";
 import Train from "@/pages/Train";
 import Practice from "@/pages/Practice";
@@ -30,23 +31,25 @@ function App() {
     // (Home/Stats/Admin/...) siguen scrolleando exactamente igual que antes,
     // solo que el scrollbar vive en este div en vez de en el body.
     <div className="App h-screen flex flex-col overflow-hidden bg-[#0b0e13] text-[#F8FAFC]">
-      <BrowserRouter>
-        <NavBar stats={navBarStats} />
-        <NavBarStatsSetterProvider value={setNavBarStats}>
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/train" element={<Train />} />
-              <Route path="/practice" element={<Practice />} />
-              <Route path="/tournament" element={<Tournament />} />
-              <Route path="/sitandgo" element={<SitAndGo />} />
-              <Route path="/stats" element={<Stats />} />
-              <Route path="/review" element={<Review />} />
-              <Route path="/admin" element={<Admin />} />
-            </Routes>
-          </div>
-        </NavBarStatsSetterProvider>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <NavBar stats={navBarStats} />
+          <NavBarStatsSetterProvider value={setNavBarStats}>
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/train" element={<Train />} />
+                <Route path="/practice" element={<Practice />} />
+                <Route path="/tournament" element={<Tournament />} />
+                <Route path="/sitandgo" element={<SitAndGo />} />
+                <Route path="/stats" element={<Stats />} />
+                <Route path="/review" element={<Review />} />
+                <Route path="/admin" element={<Admin />} />
+              </Routes>
+            </div>
+          </NavBarStatsSetterProvider>
+        </BrowserRouter>
+      </AuthProvider>
       <Toaster theme="dark" position="top-right" />
     </div>
   );
