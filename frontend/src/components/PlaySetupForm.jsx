@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { PLAY } from "@/constants/testIds";
 
-const PROFILES = ["nit", "tag", "lag", "station"];
+const PROFILES = ["nit", "tag", "lag", "station", "adan_magreos"];
+
+// "Adán Magreos" es un perfil de pruebas privadas (nombre ficticio, ver
+// backend/poker_bot.py PROFILE_PARAMS) — fácil de quitar/renombrar: basta
+// con borrar su entrada de PROFILES y de este mapa.
+const PROFILE_LABELS = { adan_magreos: "Adán Magreos" };
 
 const fieldClass =
   "w-full bg-[#0F1115] border border-white/12 rounded-lg px-3 py-2 text-white text-sm font-mono-poker focus:outline-none focus:border-[#3B82F6]";
@@ -108,7 +113,7 @@ export default function PlaySetupForm({ defaults, onStart, disabled }) {
         <select value={botProfile} onChange={(e) => setBotProfile(e.target.value)} className={fieldClass}>
           {PROFILES.map((p) => (
             <option key={p} value={p}>
-              {p}
+              {PROFILE_LABELS[p] || p}
             </option>
           ))}
         </select>

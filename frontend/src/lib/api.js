@@ -68,12 +68,18 @@ export async function fetchTableCoach(handId) {
   return data;
 }
 
-// Coach v2 (IA, bajo demanda — solo se llama cuando el usuario pulsa el
-// botón "Pregúntale al coach", nunca automáticamente). `villainStyle` es el
-// texto de estilo del rival ya calculado en el frontend (lib/villainStats.js,
-// ver CoachPanel.jsx) — opcional, el backend razona igual sin él.
-export async function fetchTableCoachAi(handId, villainStyle) {
-  const { data } = await client.post(`/table/${handId}/coach-ai`, { villain_style: villainStyle ?? null });
+// Coach v2 (IA, bajo demanda — solo se llama cuando el usuario pulsa un
+// botón, nunca automáticamente). `villainStyle` es el texto de estilo del
+// rival ya calculado en el frontend (lib/villainStats.js, ver CoachPanel.jsx)
+// — opcional, el backend razona igual sin él. `persona`: "default" (el
+// "Coach IA" de siempre) o "adan_magreos" (mismo endpoint, mismos números,
+// pero con su estilo de razonamiento — ver backend/coach_persona.py). Un solo
+// endpoint, el parámetro decide quién responde.
+export async function fetchTableCoachAi(handId, villainStyle, persona = "default") {
+  const { data } = await client.post(`/table/${handId}/coach-ai`, {
+    villain_style: villainStyle ?? null,
+    persona,
+  });
   return data;
 }
 

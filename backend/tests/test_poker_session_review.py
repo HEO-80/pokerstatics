@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -22,6 +23,14 @@ from poker_session_review import session_review_router
 app = FastAPI()
 app.include_router(session_review_router)
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _no_coach_persona(monkeypatch):
+    """Estos tests comparan el system prompt contra poker_session_review.SYSTEM_PROMPT
+    tal cual — determinista pase lo que pase en el COACH_PERSONA de .env de
+    esta máquina (ver coach_persona.py)."""
+    monkeypatch.delenv("COACH_PERSONA", raising=False)
 
 
 def _sample_payload(**overrides):

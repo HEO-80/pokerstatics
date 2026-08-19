@@ -1,28 +1,47 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { loadHistory, clearMistakes } from "@/lib/storage";
+import { Trash2, Trophy, XCircle } from "lucide-react";
+import { loadMistakeHistory, clearMistakeHistory } from "@/lib/mistakeHistoryStorage";
+import { MODE_LABEL } from "@/lib/mistakeHistory";
 import { REVIEW } from "@/constants/testIds";
-import { actionLabel, actionColor, phaseLabel } from "@/lib/poker";
-import PlayingCard from "@/components/PlayingCard";
-import { X, Check, Trash2 } from "lucide-react";
+import { actionLabel, actionColor } from "@/lib/poker";
+import { recommendationLabel, readingText } from "@/components/CoachPanel";
+import CardGlyphRow from "@/components/CardGlyphRow";
+
+// Repaso de errores postflop de Práctica/Sit&Go/Torneo (ver
+// hooks/useMistakeHistoryProgress.js, que alimenta este histórico a partir
+// de coachAdviceLog cada vez que decisionVerdict marca una decisión
+// "incorrect") — el quiz preflop de /train tiene su propio repaso aparte en
+// lib/storage.js y no entra aquí (son dos modelos de datos distintos: manos
+// sueltas por rango vs. decisiones en vivo por calle).
+
+const STREET_LABEL = { preflop: "Preflop", flop: "Flop", turn: "Turn", river: "River" };
+
+const MODE_FILTERS = [
+  { key: "all", label: "Todos" },
+  { key: "practice", label: MODE_LABEL.practice },
+  { key: "sitandgo", label: MODE_LABEL.sitandgo },
+  { key: "tournament", label: MODE_LABEL.tournament },
+];
 
 export default function Review() {
   const [history, setHistory] = useState([]);
-  const [filter, setFilter] = useState("mistakes"); // 'mistakes' | 'all'
-  const [selected, setSelected] = useState(null);
+  const [modeFilter, setModeFilter] = useState("all");
+  const [selectedKey, setSelectedKey] = useState(null);
 
   useEffect(() => {
-    setHistory(loadHistory());
+    setHistory(loadMistakeHistory());
   }, []);
 
-  const filtered = filter === "mistakes" ? history.filter((h) => !h.correct) : history;
+  const filtered = modeFilter === "all" ? history : history.filter((r) => r.mode === modeFilter);
   const list = [...filtered].reverse();
+  const selected = list.find((r) => r.sourceKey === selectedKey) ?? null;
 
-  const clearAllMistakes = () => {
-    clearMistakes();
-    setHistory(loadHistory());
-    setSelected(null);
-    toast.success("Mistakes cleared");
+  const clearAll = () => {
+    clearMistakeHistory();
+    setHistory([]);
+    setSelectedKey(null);
+    toast.success("Errores borrados");
   };
 
   return (
@@ -34,31 +53,24 @@ export default function Review() {
             Learn From Errors
           </h1>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setFilter("mistakes")}
-            className={`px-4 py-2 rounded-lg text-sm font-display uppercase tracking-wider transition-colors ${
-              filter === "mistakes"
-                ? "bg-white text-black"
-                : "border border-white/12 text-white hover:bg-white/5"
-            }`}
-          >
-            Mistakes ({history.filter((h) => !h.correct).length})
-          </button>
-          <button
-            onClick={() => setFilter("all")}
-            className={`px-4 py-2 rounded-lg text-sm font-display uppercase tracking-wider transition-colors ${
-              filter === "all"
-                ? "bg-white text-black"
-                : "border border-white/12 text-white hover:bg-white/5"
-            }`}
-          >
-            All ({history.length})
-          </button>
-          {filter === "mistakes" && history.some((h) => !h.correct) && (
+        <div className="flex gap-2 flex-wrap">
+          {MODE_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setModeFilter(f.key)}
+              className={`px-4 py-2 rounded-lg text-sm font-display uppercase tracking-wider transition-colors ${
+                modeFilter === f.key
+                  ? "bg-white text-black"
+                  : "border border-white/12 text-white hover:bg-white/5"
+              }`}
+            >
+              {f.label} ({f.key === "all" ? history.length : history.filter((r) => r.mode === f.key).length})
+            </button>
+          ))}
+          {history.length > 0 && (
             <button
               data-testid={REVIEW.clearBtn}
-              onClick={clearAllMistakes}
+              onClick={clearAll}
               className="px-4 py-2 rounded-lg border border-[#EF4444]/40 text-[#EF4444] text-sm font-display uppercase tracking-wider hover:bg-[#EF4444]/10 transition-colors inline-flex items-center gap-2"
             >
               <Trash2 className="w-4 h-4" /> Clear
@@ -70,61 +82,32 @@ export default function Review() {
       {list.length === 0 ? (
         <div data-testid={REVIEW.empty} className="glass-panel rounded-2xl p-10 text-center">
           <div className="font-display font-bold text-2xl uppercase text-white mb-2">
-            {filter === "mistakes" ? "No mistakes yet" : "No hands yet"}
+            {history.length === 0 ? "No mistakes yet" : "No mistakes in this mode"}
           </div>
           <div className="text-[#94A3B8]">
-            {filter === "mistakes"
-              ? "Keep training — mistakes will appear here for review."
-              : "Play some hands in Training to see them here."}
+            Juega en Práctica, Sit&amp;Go o Torneo con el coach activo — tus decisiones -EV aparecerán aquí para
+            repasarlas.
           </div>
         </div>
       ) : (
         <div className="grid md:grid-cols-[1fr_2fr] gap-4">
           <div data-testid={REVIEW.list} className="glass-panel rounded-2xl overflow-hidden">
             <div className="max-h-[70vh] overflow-y-auto">
-              {list.map((h, idx) => (
-                <button
-                  key={`${h.timestamp}-${h.hand}-${idx}`}
-                  onClick={() => setSelected(h)}
-                  data-testid={`review-item-${idx}`}
-                  className={`w-full text-left px-4 py-3 border-b border-white/6 hover:bg-white/4 transition-colors flex items-center justify-between ${
-                    selected === h ? "bg-white/6" : ""
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    {h.correct ? (
-                      <Check className="w-4 h-4 text-[#10B981]" />
-                    ) : (
-                      <X className="w-4 h-4 text-[#EF4444]" />
-                    )}
-                    <div>
-                      <div className="font-mono-poker text-white font-bold">{h.hand}</div>
-                      <div className="text-[11px] text-[#94A3B8]">
-                        {h.hero_position}
-                        {h.villain_position ? ` vs ${h.villain_position}` : ""} ·{" "}
-                        {phaseLabel(h.phase)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div
-                      className="text-[11px] font-display uppercase tracking-wider"
-                      style={{ color: actionColor(h.user_action) }}
-                    >
-                      {actionLabel(h.user_action)}
-                    </div>
-                    <div className="text-[10px] text-[#475569]">
-                      best: {actionLabel(h.top_action)}
-                    </div>
-                  </div>
-                </button>
+              {list.map((r, idx) => (
+                <MistakeListItem
+                  key={r.sourceKey}
+                  record={r}
+                  idx={idx}
+                  active={selectedKey === r.sourceKey}
+                  onClick={() => setSelectedKey(r.sourceKey)}
+                />
               ))}
             </div>
           </div>
 
           <div className="glass-panel rounded-2xl p-6">
             {selected ? (
-              <HandDetail hand={selected} />
+              <MistakeDetail record={selected} />
             ) : (
               <div className="h-full flex items-center justify-center text-[#94A3B8]">
                 Select a hand to inspect the full breakdown.
@@ -137,80 +120,111 @@ export default function Review() {
   );
 }
 
-function HandDetail({ hand }) {
-  const actions = Object.entries(hand.actions || {})
-    .filter(([, p]) => p > 0)
-    .sort((a, b) => b[1] - a[1]);
+function MistakeListItem({ record, idx, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      data-testid={`review-item-${idx}`}
+      className={`w-full text-left px-4 py-3 border-b border-white/6 hover:bg-white/4 transition-colors flex items-center justify-between gap-3 ${
+        active ? "bg-white/6" : ""
+      }`}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <XCircle className="w-4 h-4 text-[#EF4444] shrink-0" />
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <CardGlyphRow cards={record.heroCards ?? []} gap="gap-1" />
+            {record.board?.length > 0 && (
+              <span className="text-[#475569] text-xs">· <CardGlyphRow cards={record.board} gap="gap-1" /></span>
+            )}
+          </div>
+          <div className="text-[11px] text-[#94A3B8] truncate">
+            {MODE_LABEL[record.mode] ?? record.mode} · {STREET_LABEL[record.street] ?? record.street} · mano #
+            {record.handNumber}
+          </div>
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <div className="text-[11px] font-display uppercase tracking-wider" style={{ color: actionColor(record.heroAction) }}>
+          {actionLabel(record.heroAction)}
+        </div>
+        <div className="text-[10px] text-[#475569]">
+          best: {actionLabel(record.recommendation?.accion_sugerida)}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function outcomeLine(record) {
+  if (!record.handFinished) return null;
+  return record.heroWonHand ? "Ganaste la mano." : "Perdiste la mano.";
+}
+
+function MistakeDetail({ record }) {
+  const outcome = outcomeLine(record);
 
   return (
     <div>
-      <div className="flex items-center gap-4 mb-6">
-        <div className="flex gap-2">
-          {hand.cards?.map((c, i) => (
-            <PlayingCard key={i} rank={c.rank} suit={c.suit} size="md" />
-          ))}
+      <div className="flex items-center gap-4 mb-6 flex-wrap">
+        <div className="flex items-center gap-2">
+          <CardGlyphRow cards={record.heroCards ?? []} gap="gap-1.5" />
+          {record.board?.length > 0 && (
+            <>
+              <span className="text-[#475569]">·</span>
+              <CardGlyphRow cards={record.board} gap="gap-1.5" />
+            </>
+          )}
         </div>
         <div>
-          <div className="font-display font-bold text-3xl uppercase tracking-tight text-white">
-            {hand.hand}
+          <div className="font-display font-bold text-2xl uppercase tracking-tight text-white">
+            {MODE_LABEL[record.mode] ?? record.mode} · {STREET_LABEL[record.street] ?? record.street}
           </div>
           <div className="text-sm text-[#94A3B8]">
-            {hand.scenario_label}
+            Mano #{record.handNumber} · {new Date(record.timestamp).toLocaleString()}
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 mb-6">
-        <MetaCell label="Hero" value={hand.hero_position} />
-        <MetaCell label="Villain" value={hand.villain_position ?? "—"} />
-        <MetaCell label="Stack" value={`${hand.stack_bb} BB`} />
-        <MetaCell label="Phase" value={phaseLabel(hand.phase)} />
+        <MetaCell label="Bote" value={record.potTotal} />
+        <MetaCell label="Para pagar" value={record.toCall > 0 ? record.toCall : "—"} />
         <MetaCell
-          label="You Played"
-          value={actionLabel(hand.user_action)}
-          color={actionColor(hand.user_action)}
+          label="Jugaste"
+          value={actionLabel(record.heroAction)}
+          color={actionColor(record.heroAction)}
         />
         <MetaCell
-          label="Best Play"
-          value={actionLabel(hand.top_action)}
-          color={actionColor(hand.top_action)}
+          label="Mejor jugada"
+          value={actionLabel(record.recommendation?.accion_sugerida)}
+          color={actionColor(record.recommendation?.accion_sugerida)}
         />
       </div>
 
-      <div className="text-[10px] uppercase tracking-widest text-[#475569] mb-2">
-        Full Frequency Breakdown
-      </div>
-      <div className="space-y-2">
-        {actions.map(([a, p]) => (
-          <div key={a} className="flex items-center gap-3">
-            <div className="w-24 text-sm font-mono-poker" style={{ color: actionColor(a) }}>
-              {actionLabel(a)}
-            </div>
-            <div className="flex-1 h-2 rounded-full bg-white/6 overflow-hidden">
-              <div
-                className="h-full rounded-full"
-                style={{ width: `${p * 100}%`, background: actionColor(a) }}
-              />
-            </div>
-            <div className="w-14 text-right font-mono-poker text-sm text-white">
-              {(p * 100).toFixed(0)}%
-            </div>
+      {record.recommendation && (
+        <div className="mb-4 p-3 rounded-lg border border-white/12 bg-white/4">
+          <div className="text-[10px] uppercase tracking-widest text-[#475569] mb-1">
+            {recommendationLabel(record.recommendation)}
           </div>
-        ))}
-      </div>
+          <div className="text-sm text-[#F8FAFC]">{record.recommendation.explicacion}</div>
+        </div>
+      )}
 
-      <div
-        className="mt-6 p-3 rounded-lg border text-sm"
-        style={{
-          borderColor: hand.correct ? "#10B98155" : "#EF444455",
-          background: hand.correct ? "#10B98111" : "#EF444411",
-          color: hand.correct ? "#10B981" : "#EF4444",
-        }}
-      >
-        {hand.correct
-          ? `Your action (${actionLabel(hand.user_action)}) was inside the correct range.`
-          : `Your action (${actionLabel(hand.user_action)}) was outside the range. The main play here is ${actionLabel(hand.top_action)}.`}
-      </div>
+      <div className="text-sm text-[#94A3B8] leading-relaxed mb-4">{readingText(record)}</div>
+
+      {outcome && (
+        <div
+          className="p-3 rounded-lg border text-sm flex items-center gap-2"
+          style={{
+            borderColor: record.heroWonHand ? "#10B98155" : "#EF444455",
+            background: record.heroWonHand ? "#10B98111" : "#EF444411",
+            color: record.heroWonHand ? "#10B981" : "#EF4444",
+          }}
+        >
+          {record.heroWonHand && <Trophy className="w-4 h-4 shrink-0" />}
+          {outcome}
+        </div>
+      )}
     </div>
   );
 }

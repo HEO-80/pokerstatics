@@ -125,6 +125,7 @@ export function evaluateAction(actionsMap, userAction) {
 
 export const ACTION_META = {
   fold: { label: "Fold", color: "#EF4444" },
+  check: { label: "Check", color: "#94A3B8" },
   call: { label: "Call", color: "#3B82F6" },
   marginal_call: { label: "Marginal Call", color: "#F59E0B" },
   "3bet": { label: "3-Bet", color: "#10B981" },

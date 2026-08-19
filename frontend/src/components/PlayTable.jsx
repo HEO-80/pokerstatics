@@ -21,7 +21,7 @@ import { PLAY } from "@/constants/testIds";
 function seatAngleDeg(offset, seatCount) {
   const table = SEAT_ANGLES_DEG[seatCount];
   if (table) return table[offset];
-  return (offset * 360) / seatCount;
+  return generalSeatAngleDeg(offset, seatCount);
 }
 
 /**
@@ -35,13 +35,66 @@ function seatAngleDeg(offset, seatCount) {
  * del asiento vecino (comprobado en pantalla con capturas reales, no solo a
  * ojo). Esta tabla ensancha esos dos huecos (40°→65°) y le quita ese margen a
  * los huecos vecinos (40°→30° / 40°→25°), que tenían de sobra. Deja intactos
- * los asientos de arriba (4,5) y el hueco junto al hero (0-1 / 8-0). Para
- * cualquier otro nº de asientos se seguía usando el paso uniforme de siempre
- * (no hay overlap reportado ahí).
+ * los asientos de arriba (4,5) y el hueco junto al hero (0-1 / 8-0).
+ *
+ * Para cualquier otro nº de asientos (Práctica, que a diferencia de Sit&Go/
+ * Torneo NO fija `totalSeats` y por tanto usa `players.length` tal cual —
+ * ver HandTable.jsx) esto usaba antes el paso uniforme puro (`offset*360/
+ * seatCount`): el MISMO defecto de fondo que el párrafo de arriba describe
+ * para 9, solo que sin la tabla a mano que lo compensa — con pocos
+ * jugadores (p.ej. 6) un asiento cae en esa misma zona lateral "plana" del
+ * óvalo y su caja de nombre/fichas termina encima de las cartas del hero o
+ * de un vecino (bug real reportado en Práctica). `generalSeatAngleDeg` de
+ * abajo generaliza la MISMA idea (ensanchar cerca de 90°/270°, angostar
+ * cerca de 180°) con una fórmula en vez de necesitar una tabla nueva por
+ * cada N, para que escale a cualquier número de jugadores sin repetir este
+ * ajuste a mano cada vez.
  */
 const SEAT_ANGLES_DEG = {
   9: [0, 40, 70, 135, 160, 200, 225, 290, 320],
 };
+
+// Cuánto se "roba" ángulo de la zona superior (180°, opuesta al hero) para
+// dárselo a las dos zonas laterales (90°/270°) — mismo criterio que la
+// tabla de 9 de arriba, aquí como una constante ajustable en vez de números
+// sueltos repetidos por cada N. 0 = paso uniforme puro, 1 = el máximo antes
+// de que dos asientos puedan llegar a cruzarse (ver comprobación de
+// monotonía en el docstring de generalSeatAngleDeg).
+const SIDE_WIDEN_K = 0.4;
+
+/**
+ * Ángulo general (offset>0) para cualquier nº de asientos que no tenga tabla
+ * propia en SEAT_ANGLES_DEG. En vez de repartir el ÁNGULO en partes iguales
+ * (lo que amontona asientos en las zonas laterales del óvalo, ver docstring
+ * de SEAT_ANGLES_DEG), integra una densidad `1 − K·cos(4π·t)` sobre
+ * t = offset/seatCount ∈ (0,1]: esa densidad es más ALTA cerca de t=0.25 y
+ * t=0.75 (ángulos 90°/270°, las zonas laterales problemáticas) y más BAJA
+ * cerca de t=0.5 (180°, el lado opuesto al hero) — el resultado es que los
+ * huecos se ensanchan justo donde antes se pisaban y se angostan donde sobra
+ * espacio, para cualquier N, sin necesitar una tabla nueva cada vez.
+ *
+ * El hueco junto al hero (offset 1 y N-1 — las cartas más grandes de la
+ * mesa, las que más margen necesitan) NUNCA queda por debajo del paso
+ * uniforme: la densidad de arriba, integrada en un tramo finito, sí lo
+ * angostaría un poco justo ahí (el "hueco" de la fórmula, no un error de
+ * signo), así que se recorta de vuelta (`Math.max`/`Math.min`) al valor
+ * uniforme exacto cuando eso pasaría — igual que la tabla de 9 mantiene sus
+ * huecos 0-1/8-0 en el mismo 40° que el paso uniforme.
+ *
+ * Monotonía (ningún asiento adelanta al siguiente, así nunca se cruzan): la
+ * derivada de la densidad nunca baja de `1 - K`, así que con K=0.4 (< 1)
+ * queda garantizada para cualquier N.
+ */
+function generalSeatAngleDeg(offset, seatCount) {
+  if (offset === 0) return 0;
+  const uniformGap = 360 / seatCount;
+  const t = offset / seatCount;
+  const widenPerRadian = (90 * SIDE_WIDEN_K) / Math.PI;
+  const raw = 360 * t - widenPerRadian * Math.sin(4 * Math.PI * t);
+  if (offset === 1) return Math.max(raw, uniformGap);
+  if (offset === seatCount - 1) return Math.min(raw, 360 - uniformGap);
+  return raw;
+}
 
 function seatPoint(offset, seatCount, radiusX, radiusY) {
   const angle = (seatAngleDeg(offset, seatCount) * Math.PI) / 180; // 0 = bottom

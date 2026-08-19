@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -24,6 +25,14 @@ from poker_table_api import table_router
 app = FastAPI()
 app.include_router(table_router)
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _no_coach_persona(monkeypatch):
+    """Estos tests comparan el system prompt contra poker_coach_ai.SYSTEM_PROMPT
+    tal cual — determinista pase lo que pase en el COACH_PERSONA de .env de
+    esta máquina (ver coach_persona.py)."""
+    monkeypatch.delenv("COACH_PERSONA", raising=False)
 
 
 def _known_hand_id() -> str:
@@ -189,6 +198,77 @@ def test_coach_ai_works_without_optional_villain_style(monkeypatch):
     resp = client.post(f"/api/table/{hand_id}/coach-ai", json={})
     assert resp.status_code == 200, resp.text
     assert resp.json()["text"] == "Análisis sin perfil de sesión."
+
+
+def test_coach_ai_persona_default_or_absent_leaves_system_prompt_untouched(monkeypatch):
+    """Botón "Coach IA" de siempre: persona ausente Y persona="default" deben
+    dar EXACTAMENTE el mismo system prompt de base — ver Tarea "segundo coach
+    Adán Magreos, sin tocar el actual"."""
+    hand_id = _known_hand_id()
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-123")
+
+    captured = {}
+
+    def fake_post(url, params=None, json=None, timeout=None):
+        captured["json"] = json
+        return _gemini_success([{"text": "ok"}])
+
+    monkeypatch.setattr(poker_coach_ai.requests, "post", fake_post)
+
+    resp = client.post(f"/api/table/{hand_id}/coach-ai", json={})
+    assert resp.status_code == 200, resp.text
+    assert captured["json"]["system_instruction"]["parts"][0]["text"] == poker_coach_ai.SYSTEM_PROMPT
+
+    resp = client.post(f"/api/table/{hand_id}/coach-ai", json={"persona": "default"})
+    assert resp.status_code == 200, resp.text
+    assert captured["json"]["system_instruction"]["parts"][0]["text"] == poker_coach_ai.SYSTEM_PROMPT
+
+
+def test_coach_ai_persona_adan_magreos_adds_style_without_changing_context(monkeypatch):
+    """Botón "Coach Adán Magreos": mismo hand_id/números/historial (el mensaje
+    de usuario no cambia), pero el system prompt gana el bloque de estilo."""
+    hand_id = _known_hand_id()
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-123")
+
+    captured = {}
+
+    def fake_post(url, params=None, json=None, timeout=None):
+        captured["json"] = json
+        return _gemini_success([{"text": "Con este estilo, yo pagaria."}])
+
+    monkeypatch.setattr(poker_coach_ai.requests, "post", fake_post)
+
+    resp = client.post(f"/api/table/{hand_id}/coach-ai", json={"persona": "adan_magreos"})
+    assert resp.status_code == 200, resp.text
+
+    system_text = captured["json"]["system_instruction"]["parts"][0]["text"]
+    assert system_text.startswith(poker_coach_ai.SYSTEM_PROMPT)
+    assert system_text != poker_coach_ai.SYSTEM_PROMPT
+    assert "Identidad:" in system_text
+    # El contexto de mano (historial/hero/board) NO cambia por la persona —
+    # solo el system prompt gana el bloque de estilo. (No se compara con una
+    # segunda llamada a build_ai_context: la equity es Monte Carlo sin seed
+    # fija y variaría entre llamadas — se comprueban los datos estáticos.)
+    user_text = captured["json"]["contents"][0]["parts"][0]["text"]
+    assert "MANO DEL HERO: As Ah" in user_text
+    assert "BOARD: Kc 7h 2s" in user_text
+
+
+def test_coach_ai_unknown_persona_falls_back_to_default_prompt(monkeypatch):
+    hand_id = _known_hand_id()
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-123")
+
+    captured = {}
+
+    def fake_post(url, params=None, json=None, timeout=None):
+        captured["json"] = json
+        return _gemini_success([{"text": "ok"}])
+
+    monkeypatch.setattr(poker_coach_ai.requests, "post", fake_post)
+
+    resp = client.post(f"/api/table/{hand_id}/coach-ai", json={"persona": "no_existe"})
+    assert resp.status_code == 200, resp.text
+    assert captured["json"]["system_instruction"]["parts"][0]["text"] == poker_coach_ai.SYSTEM_PROMPT
 
 
 def test_coach_ai_returns_500_when_api_key_missing(monkeypatch):

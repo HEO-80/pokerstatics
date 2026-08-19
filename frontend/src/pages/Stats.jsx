@@ -1,10 +1,11 @@
 import { useEffect, useState, useMemo } from "react";
 import { loadHistory, computeStats, clearHistory } from "@/lib/storage";
 import { loadPointsProgress } from "@/lib/pointsStorage";
+import { loadDecisionStats, clearDecisionStats } from "@/lib/decisionStatsStorage";
 import { levelProgress } from "@/lib/levels";
 import { STATS, POINTS } from "@/constants/testIds";
 import { actionLabel, phaseLabel, actionColor } from "@/lib/poker";
-import { Flame, Target, Layers, TrendingUp, Trash2, Star } from "lucide-react";
+import { Flame, Target, Layers, TrendingUp, Trash2, Star, Swords } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -26,18 +27,41 @@ function pctColor(p) {
 export default function Stats() {
   const [history, setHistory] = useState([]);
   const [pointsProgress, setPointsProgress] = useState(null);
+  const [decisionStats, setDecisionStats] = useState(null);
 
   useEffect(() => {
     setHistory(loadHistory());
     setPointsProgress(loadPointsProgress());
+    setDecisionStats(loadDecisionStats());
   }, []);
 
   const stats = useMemo(() => computeStats(history), [history]);
-  const empty = stats.total === 0;
+  const quizEmpty = stats.total === 0;
+  const decisionsEmpty =
+    !decisionStats || decisionStats.correct + decisionStats.incorrect + decisionStats.marginal === 0;
+  const empty = quizEmpty && decisionsEmpty;
   const progress = useMemo(
     () => (pointsProgress ? levelProgress(pointsProgress.totalPoints) : null),
     [pointsProgress],
   );
+
+  const decisionsWithVerdict = decisionStats ? decisionStats.correct + decisionStats.incorrect : 0;
+  const decisionsAccuracy = decisionsWithVerdict > 0 ? decisionStats.correct / decisionsWithVerdict : 0;
+
+  const streetData = Object.entries(decisionStats?.byStreet ?? {}).map(([street, v]) => ({
+    name: street.charAt(0).toUpperCase() + street.slice(1),
+    key: street,
+    accuracy: v.total ? Math.round((v.correct / v.total) * 100) : 0,
+    total: v.total,
+  }));
+  streetData.sort((a, b) => b.total - a.total);
+
+  const decisionActionData = Object.entries(decisionStats?.byAction ?? {}).map(([a, v]) => ({
+    name: actionLabel(a),
+    key: a,
+    accuracy: v.total ? Math.round((v.correct / v.total) * 100) : 0,
+    total: v.total,
+  }));
 
   const positionData = Object.entries(stats.byPosition).map(([pos, v]) => ({
     name: pos,
@@ -75,7 +99,9 @@ export default function Stats() {
 
   const doReset = () => {
     clearHistory();
+    clearDecisionStats();
     setHistory([]);
+    setDecisionStats(loadDecisionStats());
     toast.success("History cleared");
   };
 
@@ -85,7 +111,7 @@ export default function Stats() {
         <div>
           <div className="text-[10px] uppercase tracking-widest text-[#475569]">Dashboard</div>
           <h1 className="font-display font-bold text-5xl uppercase tracking-tight text-white">
-            Your Preflop Stats
+            Your Stats
           </h1>
         </div>
         {!empty && (
@@ -149,12 +175,12 @@ export default function Stats() {
             No hands yet
           </div>
           <div className="text-[#94A3B8]">
-            Play some hands in Training to see stats here.
+            Play some hands in Train, Práctica, Sit&amp;Go or Torneo to see stats here.
           </div>
         </div>
       )}
 
-      {!empty && (
+      {!quizEmpty && (
         <>
           {/* KPI Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -248,6 +274,79 @@ export default function Stats() {
               testId={STATS.byAction}
               title="Accuracy by Action"
               data={actionData}
+              colorByKey={(k) => actionColor(k)}
+            />
+          </div>
+        </>
+      )}
+
+      {!decisionsEmpty && (
+        <>
+          <div className="mt-10 mb-4">
+            <div className="text-[10px] uppercase tracking-widest text-[#475569]">
+              Práctica / Sit&amp;Go / Torneo
+            </div>
+            <h2 className="font-display font-bold text-2xl uppercase tracking-tight text-white">
+              In-Game Decisions
+            </h2>
+          </div>
+
+          {/* KPI Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="glass-panel rounded-2xl p-6 md:col-span-1">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-[#475569]">
+                <Swords className="w-3.5 h-3.5" /> Decision Accuracy
+              </div>
+              <div
+                className="mt-2 font-display font-bold text-7xl leading-none"
+                data-testid={STATS.decisionsOverallAccuracy}
+                style={{ color: pctColor(decisionsAccuracy) }}
+              >
+                {(decisionsAccuracy * 100).toFixed(0)}%
+              </div>
+              <div className="mt-3 text-sm text-[#94A3B8]">
+                <span className="font-mono-poker text-white">{decisionStats.correct}</span> correct /{" "}
+                <span className="font-mono-poker text-white">{decisionsWithVerdict}</span> total
+              </div>
+            </div>
+
+            <div className="glass-panel rounded-2xl p-6">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-[#475569]">
+                <Layers className="w-3.5 h-3.5" /> Decisions Played
+              </div>
+              <div
+                className="mt-2 font-display font-bold text-6xl leading-none text-white"
+                data-testid={STATS.decisionsTotal}
+              >
+                {decisionsWithVerdict}
+              </div>
+              <div className="mt-3 text-sm text-[#94A3B8]">
+                Mistakes:{" "}
+                <span className="font-mono-poker text-[#EF4444]">{decisionStats.incorrect}</span>
+              </div>
+            </div>
+
+            <div className="glass-panel rounded-2xl p-6">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-[#475569]">
+                <Target className="w-3.5 h-3.5" /> Marginal Spots
+              </div>
+              <div
+                className="mt-2 font-display font-bold text-6xl leading-none text-[#F59E0B]"
+                data-testid={STATS.decisionsMarginal}
+              >
+                {decisionStats.marginal}
+              </div>
+              <div className="mt-3 text-sm text-[#94A3B8]">Ambas líneas defendibles según el coach</div>
+            </div>
+          </div>
+
+          {/* Charts */}
+          <div className="mt-8 grid md:grid-cols-2 gap-4">
+            <ChartCard testId={STATS.decisionsByStreet} title="Accuracy by Street" data={streetData} />
+            <ChartCard
+              testId={STATS.decisionsByAction}
+              title="Accuracy by Action"
+              data={decisionActionData}
               colorByKey={(k) => actionColor(k)}
             />
           </div>

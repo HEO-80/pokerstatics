@@ -8,6 +8,8 @@ import { createTableHand } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { usePointsProgress } from "@/hooks/usePointsProgress";
+import { useDecisionStatsProgress } from "@/hooks/useDecisionStatsProgress";
+import { useMistakeHistoryProgress } from "@/hooks/useMistakeHistoryProgress";
 import { useNavBarStats } from "@/hooks/useNavBarStats";
 import { SITANDGO } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
@@ -35,6 +37,18 @@ const fieldClass =
   "w-full bg-[#0F1115] border border-white/12 rounded-lg px-3 py-2 text-white text-sm font-mono-poker focus:outline-none focus:border-[#3B82F6]";
 
 const PROFILES = ["nit", "tag", "lag", "station"];
+
+// "Adán Magreos" (perfil de pruebas privadas, nombre ficticio — ver
+// backend/poker_bot.py PROFILE_PARAMS) NO es una opción más del selector:
+// es UN bot fijo más en la mesa, como un jugador real — se sortea su
+// asiento (slot 1..TOTAL_SEATS-1, nunca el hero) una vez al empezar la
+// partida (ver adanSlotRef en el componente) y el resto de bots siguen el
+// perfil elegido arriba, tal cual siempre. Si su asiento queda eliminado,
+// deja de aparecer el resto de esa partida — no está garantizado que
+// "llegue" a ningún sitio, juega como uno más. Fácil de quitar: basta con
+// borrar el uso de ADAN_PROFILE/adanSlotRef más abajo.
+const ADAN_PROFILE = "adan_magreos";
+const ADAN_NAME = "Adán Magreos";
 
 /**
  * Igual que antes, pero en vez de renumerar 0..k-1 en el orden en que vienen
@@ -82,6 +96,12 @@ export default function SitAndGo() {
   // mismo punto del óvalo, aunque el backend renumere sus asientos.
   const rosterRef = useRef([]);
   const aliveSlotsRef = useRef([]);
+  // Slot persistente (1..TOTAL_SEATS-1, nunca el hero) sorteado UNA vez al
+  // empezar la partida para ser "Adán Magreos" — ver ADAN_PROFILE arriba.
+  // Si ese slot no sigue vivo (ver buildSurvivorHand), simplemente no
+  // aparece ningún seat con su perfil en la mano siguiente: bustea como
+  // cualquier bot, no hay lógica especial para "traerlo de vuelta".
+  const adanSlotRef = useRef(null);
   const {
     view,
     handHistory,
@@ -98,6 +118,8 @@ export default function SitAndGo() {
     actionAnimated,
   } = useTableSession("sitandgo");
   const pointsProgress = usePointsProgress(coachAdviceLog);
+  useDecisionStatsProgress(coachAdviceLog);
+  useMistakeHistoryProgress(coachAdviceLog, "sitandgo");
   // El asiento de backend SÍ se renumera cada mano según quién sobrevive
   // (ver buildSurvivorHand) — hay que pasar por aliveSlotsRef (asiento de
   // ESTA mano -> slot persistente) antes de mirar el roster, igual que hace
@@ -105,6 +127,20 @@ export default function SitAndGo() {
   const getPlayerName = useCallback((seat, players) => {
     const slot = aliveSlotsRef.current[seat] ?? seat;
     return rosterRef.current[slot] ?? seatName(players, seat);
+  }, []);
+
+  // Perfil por asiento de ESTA mano: el slot sorteado para Adán Magreos
+  // (si sigue vivo) juega con su perfil, el resto sigue el elegido en el
+  // lobby — ver ADAN_PROFILE arriba y _resolve_bot_profiles en
+  // poker_table_api.py (acepta un dict seat->profile, no solo un string).
+  const botProfilesForHand = useCallback((numPlayers, profile) => {
+    const profiles = {};
+    for (let seat = 0; seat < numPlayers; seat++) {
+      if (seat === HERO_SEAT) continue;
+      const slot = aliveSlotsRef.current[seat] ?? seat;
+      profiles[seat] = slot === adanSlotRef.current ? ADAN_PROFILE : profile;
+    }
+    return profiles;
   }, []);
 
   const dealHand = useCallback(
@@ -138,7 +174,7 @@ export default function SitAndGo() {
             bb: blinds.bb,
             button,
             hero_seat: HERO_SEAT,
-            bot_profiles: cfg.botProfile,
+            bot_profiles: botProfilesForHand(numPlayers, cfg.botProfile),
             ...(stacksBySeat ? { stacks: stacksBySeat } : {}),
           }),
         {
@@ -154,7 +190,7 @@ export default function SitAndGo() {
       );
       if (!data) setPhase("lobby");
     },
-    [dealAnimated, getPlayerName],
+    [dealAnimated, getPlayerName, botProfilesForHand],
   );
 
   const startSitAndGo = (e) => {
@@ -165,7 +201,13 @@ export default function SitAndGo() {
     // como "recargué la página a media partida y ahora empiezo otra".
     reset();
     const heroName = lobby.heroName.trim() || "Hero";
-    rosterRef.current = [heroName, ...pickRandomNames(TOTAL_SEATS - 1)];
+    const botNames = pickRandomNames(TOTAL_SEATS - 1);
+    // Slot 1..TOTAL_SEATS-1 al azar para Adán Magreos (nunca el hero, slot
+    // 0) — botNames está indexado 0..TOTAL_SEATS-2 para los slots 1..TOTAL_
+    // SEATS-1, de ahí el -1.
+    adanSlotRef.current = 1 + Math.floor(Math.random() * (TOTAL_SEATS - 1));
+    botNames[adanSlotRef.current - 1] = ADAN_NAME;
+    rosterRef.current = [heroName, ...botNames];
     // Primera mano: el asiento de backend i ES el slot i (identidad = orden
     // de reparto inicial).
     aliveSlotsRef.current = Array.from({ length: TOTAL_SEATS }, (_, i) => i);

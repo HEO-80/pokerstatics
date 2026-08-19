@@ -66,6 +66,22 @@ PROFILE_PARAMS = {
         value_thresh=0.50, call_margin=0.25, bluff_freq=0.01, bet_size=0.55,
         open_size_bb=2.5,
     ),
+    # "adan_magreos" — perfil de pruebas privadas (nombre ficticio, ver
+    # backend/data/adan_magreos_bot_profile.json para la especificación
+    # completa de tendencias y su "nota_importante": fácil de quitar/renombrar
+    # para la versión pública, basta con borrar esta entrada + su línea en
+    # OPEN_RANGE_WIDEN_PROFILES más abajo). Parte de "lag" con 3 nudges
+    # aprobados (raise_min/value_thresh/bluff_freq más agresivos — alta
+    # frecuencia, polariza antes, presiona más sin sobrefarolear); el resto
+    # de campos (call_margin/bet_size/open_size_bb) se quedan igual que lag
+    # porque bet_size/open_size_bb YA están en el techo documentado del
+    # sistema (0.75 / 2.5) y no hay señal clara para mover call_margin. NO
+    # toca nit/tag/lag/station ni sus valores.
+    "adan_magreos": dict(
+        raise_min=0.40, position_spread=0.20,
+        value_thresh=0.42, call_margin=0.08, bluff_freq=0.28, bet_size=0.75,
+        open_size_bb=2.5,
+    ),
 }
 
 FACING_RAISE_RAISE_BUMP = 0.10
@@ -300,7 +316,14 @@ _RAW_OPENING_RANGES = _load_opening_ranges()
 #   tag / station: el rango tal cual (station modula pagar-vs-subir en su
 #            lógica postflop existente, no la apertura).
 OPEN_RANGE_TIGHTEN_PROFILES = {"nit": 0.70}
-OPEN_RANGE_WIDEN_PROFILES = {"lag": 0.20}
+# adan_magreos ensancha un pelín MÁS que lag ("más suelto en mesa corta que
+# un lag normal", sin pasarse) — OJO: esto solo se nota con stack PROFUNDO
+# (>40bb, sin cobertura de preflop_charts). En fase corta (<=40bb) sigue
+# exactamente el mismo chart real que todos los perfiles (preflop_charts.py
+# no recibe `profile`, es universal) — ahí "mantener el uso de los rangos
+# cableados" significa que juega IGUAL que los demás, no más suelto; no hay
+# parámetro que module el chart por perfil hoy.
+OPEN_RANGE_WIDEN_PROFILES = {"lag": 0.20, "adan_magreos": 0.25}
 
 
 def _base_open_set(position: str) -> frozenset:

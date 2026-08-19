@@ -135,6 +135,11 @@ class CoachAiIn(BaseModel):
     # conserva entre manos), así que el frontend lo manda si lo tiene.
     # Opcional: sin él, la IA razona igual, solo que sin ese dato extra.
     villain_style: Optional[str] = None
+    # Qué coach responde: "default" (o ausente) = el de siempre, sin tocar.
+    # "adan_magreos" = mismo contexto/números, pero con su estilo de
+    # razonamiento (ver coach_persona.py) — dos botones en el frontend piden
+    # el mismo endpoint con este campo distinto, no hay dos endpoints.
+    persona: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +360,9 @@ async def coach_ai(hand_id: str, body: CoachAiIn = CoachAiIn()):
         raise HTTPException(status_code=400, detail="No es el turno del hero.")
 
     try:
-        text = ask_ai_coach(hand, hero_seat, villain_style=body.villain_style)
+        text = ask_ai_coach(
+            hand, hero_seat, villain_style=body.villain_style, persona=body.persona or "default",
+        )
     except CoachAiConfigError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except CoachAiError as e:

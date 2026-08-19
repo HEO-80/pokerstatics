@@ -12,6 +12,8 @@ import { createTableHand, simulateMttRound } from "@/lib/api";
 import { seatRoles, seatName } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { usePointsProgress } from "@/hooks/usePointsProgress";
+import { useDecisionStatsProgress } from "@/hooks/useDecisionStatsProgress";
+import { useMistakeHistoryProgress } from "@/hooks/useMistakeHistoryProgress";
 import { useNavBarStats } from "@/hooks/useNavBarStats";
 import { TOURNAMENT } from "@/constants/testIds";
 import { blindsForLevel, createLevelTracker, advanceLevelTracker, allowedStartLevels } from "@/lib/blindLevels";
@@ -74,6 +76,22 @@ const RANKING_TOP_N = 20;
 const HERO_SEAT = 0;
 const TOTAL_SEATS = 9;
 const ENTRANTS_OPTIONS = [100, 500, 1000];
+const DEFAULT_BOT_PROFILE = "tag";
+
+// "Adán Magreos" (perfil de pruebas privadas, nombre ficticio — ver
+// backend/poker_bot.py PROFILE_PARAMS) juega este torneo como un inscrito
+// MÁS del campo simulado, no en la mesa inicial del hero: se coloca una vez
+// en fieldPlayersRef al empezar (ver startTournament) y desde ahí sigue el
+// MISMO camino que cualquier otro superviviente simulado — eliminateLowStacks
+// (lib/mtt.js) puede tocarle igual que a cualquiera (nada lo protege: no
+// tiene por qué llegar a ningún sitio) y solo se sienta de verdad en la mesa
+// del hero si "juntar mesas" lo saca al azar del campo (ver nextHand) —
+// entonces (y solo entonces) sus manos las juega con ADAN_PROFILE en vez de
+// DEFAULT_BOT_PROFILE. Si llega a haber campo hasta la mesa final, puede
+// acabar sentado ahí como cualquier otro superviviente real. Fácil de
+// quitar: basta con borrar el bloque que lo inyecta en fieldPlayersRef.
+const ADAN_PROFILE = "adan_magreos";
+const ADAN_NAME = "Adán Magreos";
 
 const LOBBY_DEFAULTS = {
   heroName: "",
@@ -123,6 +141,12 @@ export default function Tournament() {
   // se reescribe en marcha: cuando un superviviente simulado se sienta en
   // una silla que quedó libre, esa silla pasa a tener un nombre nuevo.
   const chairNamesRef = useRef([]);
+  // Perfil de IA de cada silla física (paralelo a chairNamesRef) — todas
+  // arrancan en DEFAULT_BOT_PROFILE; una silla pasa a ADAN_PROFILE si
+  // "juntar mesas" sienta ahí a Adán Magreos sacado del campo (ver
+  // nextHand). El hero (silla 0) no usa esto (_resolve_bot_profiles en el
+  // backend ignora su asiento).
+  const chairProfilesRef = useRef([]);
   // Asiento de backend de ESTA mano -> silla física persistente (0-8) —
   // mismo mecanismo de traducción que Sit&Go (aliveSlotsRef), pero aquí las
   // sillas no desaparecen al vaciarse: se rellenan (ver nextHand).
@@ -143,6 +167,8 @@ export default function Tournament() {
     actionAnimated,
   } = useTableSession("tournament");
   const pointsProgress = usePointsProgress(coachAdviceLog);
+  useDecisionStatsProgress(coachAdviceLog);
+  useMistakeHistoryProgress(coachAdviceLog, "tournament");
   // Premios (lib/payouts.js): puramente función de config.totalEntrants —
   // se recalcula solo si eso cambia (una vez por partida, en la práctica).
   const payoutStructure = useMemo(
@@ -158,6 +184,19 @@ export default function Tournament() {
   const getPlayerName = useCallback((seat, players) => {
     const chair = aliveSlotsRef.current[seat] ?? seat;
     return chairNamesRef.current[chair] ?? seatName(players, seat);
+  }, []);
+
+  // Perfil por asiento de ESTA mano (ver chairProfilesRef arriba) — el
+  // backend acepta un dict seat->profile en bot_profiles, no solo un string
+  // uniforme (_resolve_bot_profiles en poker_table_api.py).
+  const botProfilesForHand = useCallback((numPlayers) => {
+    const profiles = {};
+    for (let seat = 0; seat < numPlayers; seat++) {
+      if (seat === HERO_SEAT) continue;
+      const chair = aliveSlotsRef.current[seat] ?? seat;
+      profiles[seat] = chairProfilesRef.current[chair] ?? DEFAULT_BOT_PROFILE;
+    }
+    return profiles;
   }, []);
 
   const dealHand = useCallback(
@@ -184,7 +223,7 @@ export default function Tournament() {
             bb: blinds.bb,
             button,
             hero_seat: HERO_SEAT,
-            bot_profiles: "tag",
+            bot_profiles: botProfilesForHand(numPlayers),
             ...(stacksBySeat ? { stacks: stacksBySeat } : {}),
           }),
         {
@@ -200,7 +239,7 @@ export default function Tournament() {
       );
       if (!data) setPhase("lobby");
     },
-    [dealAnimated, getPlayerName],
+    [dealAnimated, getPlayerName, botProfilesForHand],
   );
 
   const startTournament = (e) => {
@@ -217,9 +256,21 @@ export default function Tournament() {
     // inicial, igual que la mesa del hero — la variación llega ronda a
     // ronda con evolveFieldStacks (ver nextHand).
     chairNamesRef.current = [heroName, ...pickRandomNames(TOTAL_SEATS - 1)];
+    // Todas las sillas de bots arrancan en el perfil de siempre — una
+    // silla pasa a ADAN_PROFILE más adelante SOLO si "juntar mesas" saca a
+    // Adán Magreos del campo y lo sienta ahí (ver botProfilesForHand y
+    // nextHand).
+    chairProfilesRef.current = Array.from({ length: TOTAL_SEATS }, (_, i) =>
+      (i === HERO_SEAT ? null : DEFAULT_BOT_PROFILE));
     aliveSlotsRef.current = Array.from({ length: TOTAL_SEATS }, (_, i) => i);
     const fieldCount = Math.max(0, totalEntrants - TOTAL_SEATS);
     fieldPlayersRef.current = pickRandomNames(fieldCount).map((name) => ({ name, stack: startingStack }));
+    // Adán Magreos entra como UN inscrito más del campo (no en la mesa
+    // inicial del hero) — ver constante ADAN_PROFILE arriba para el porqué.
+    if (fieldCount > 0) {
+      const adanIdx = Math.floor(Math.random() * fieldCount);
+      fieldPlayersRef.current[adanIdx] = { name: ADAN_NAME, stack: startingStack, profile: ADAN_PROFILE };
+    }
 
     totalEntrantsRef.current = totalEntrants;
     startingStackRef.current = startingStack;
@@ -330,6 +381,7 @@ export default function Tournament() {
           const idx = Math.floor(Math.random() * fieldPlayersRef.current.length);
           const [joined] = fieldPlayersRef.current.splice(idx, 1);
           chairNamesRef.current[chair] = joined.name;
+          chairProfilesRef.current[chair] = joined.profile || DEFAULT_BOT_PROFILE;
           aliveChairs.set(chair, joined.stack);
         }
       }

@@ -6,6 +6,8 @@ import { createTableHand } from "@/lib/api";
 import { seatRoles } from "@/lib/table";
 import { useTableSession } from "@/hooks/useTableSession";
 import { usePointsProgress } from "@/hooks/usePointsProgress";
+import { useDecisionStatsProgress } from "@/hooks/useDecisionStatsProgress";
+import { useMistakeHistoryProgress } from "@/hooks/useMistakeHistoryProgress";
 import { PLAY } from "@/constants/testIds";
 
 // Modo Práctica: manos sueltas contra bots. Cada mano nueva reparte stacks
@@ -43,6 +45,8 @@ export default function Practice() {
     actionAnimated,
   } = useTableSession();
   const pointsProgress = usePointsProgress(coachAdviceLog);
+  useDecisionStatsProgress(coachAdviceLog);
+  useMistakeHistoryProgress(coachAdviceLog, "practice");
 
   const startHand = useCallback(
     async (formConfig) => {

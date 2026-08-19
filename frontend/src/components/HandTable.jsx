@@ -79,15 +79,36 @@ function buildCoachSpokenText(entry) {
   return parts.join(" ");
 }
 
+/** Clave de `aiByEntryId` para un coach dado (Tarea "segundo coach IA, sin
+ * quitar el actual"): el coach "default" (Coach IA de siempre) se queda con
+ * la clave de SIEMPRE (`entry.id`, sin sufijo) — no pisa ni invalida nada de
+ * lo ya persistido en localStorage antes de este cambio; cualquier otra
+ * persona ("adan_magreos") usa una clave aparte para no pisar la respuesta
+ * del coach de siempre sobre la misma decisión. */
+function aiKeyFor(entryId, persona) {
+  return persona && persona !== "default" ? `${entryId}::${persona}` : entryId;
+}
+
 /** Texto plano de todos los análisis de IA ya COMPLETADOS de la sesión: cruza
  * `coachAdviceLog` (contexto — mano/calle de cada decisión, en orden
  * cronológico) con `aiByEntryId` (la respuesta de la IA para esa decisión,
  * si se llegó a pedir) por `entry.id`, y descarta las que están cargando o
- * fallaron (solo `status === "done"` tiene texto que copiar). */
+ * fallaron (solo `status === "done"` tiene texto que copiar). Incluye la
+ * respuesta de Adán Magreos, si se pidió, justo debajo de la del coach de
+ * siempre para la misma decisión — etiquetada para no confundirlas. */
 export function buildAiAnalysisText(coachAdviceLog, aiByEntryId) {
   return (coachAdviceLog ?? [])
-    .filter((entry) => aiByEntryId[entry.id]?.status === "done")
-    .map((entry) => `Mano ${entry.handNumber} · ${entry.street}\n${aiByEntryId[entry.id].text}`)
+    .flatMap((entry) => {
+      const blocks = [];
+      if (aiByEntryId[entry.id]?.status === "done") {
+        blocks.push(`Mano ${entry.handNumber} · ${entry.street} (Coach IA)\n${aiByEntryId[entry.id].text}`);
+      }
+      const adanKey = aiKeyFor(entry.id, "adan_magreos");
+      if (aiByEntryId[adanKey]?.status === "done") {
+        blocks.push(`Mano ${entry.handNumber} · ${entry.street} (Coach Adán Magreos)\n${aiByEntryId[adanKey].text}`);
+      }
+      return blocks;
+    })
     .join("\n\n");
 }
 
@@ -191,7 +212,13 @@ export default function HandTable({
   const liveAdviceEntry = heroTurnActive && coachAdviceLog.length > 0
     ? coachAdviceLog[coachAdviceLog.length - 1]
     : null;
+  // Clave en aiByEntryId: el coach "default" (Coach IA de siempre) sigue
+  // guardándose bajo entry.id tal cual (compatible con lo ya persistido en
+  // localStorage antes de este cambio); el segundo coach usa una clave
+  // aparte para no pisar ni depender de la respuesta del primero — ver
+  // aiKeyFor más abajo y el docstring de AiCoachPanel.jsx.
   const aiState = liveAdviceEntry ? aiByEntryId[liveAdviceEntry.id] : undefined;
+  const aiStateAdan = liveAdviceEntry ? aiByEntryId[aiKeyFor(liveAdviceEntry.id, "adan_magreos")] : undefined;
 
   // Lectura por voz del coach v1: en cuanto aparece un consejo NUEVO sobre
   // la decisión en curso (mismo `liveAdviceEntry` que usa "Coach IA" arriba,
@@ -218,9 +245,14 @@ export default function HandTable({
   // hooks/usePointsProgress.js, una única instancia a nivel de página).
   const liveStreak = useMemo(() => scoreCoachAdviceLog(coachAdviceLog).currentStreak, [coachAdviceLog]);
 
-  const askAi = useCallback(async () => {
+  // `persona`: "default" (Coach IA de siempre) o "adan_magreos" (segundo
+  // coach, mismo endpoint/mismos números — ver lib/api.js). Cada uno guarda
+  // su respuesta bajo su propia clave (aiKeyFor) así que pedirle a uno no
+  // toca ni borra la respuesta del otro sobre la misma decisión.
+  const askAi = useCallback(async (persona = "default") => {
     const entry = liveAdviceEntry;
     if (!entry || !view.hand_id) return;
+    const key = aiKeyFor(entry.id, persona);
     // Volver a preguntar (o preguntar por primera vez) corta cualquier
     // lectura en curso — evita que la respuesta VIEJA siga sonando por
     // encima del nuevo "Pensando…" (aunque speak() también corta al
@@ -229,23 +261,25 @@ export default function HandTable({
     setAiSpeaking(false);
     const villainSummary = entry.villainName ? summarizePlayer(handHistory, entry.villainName) : null;
     const villainStyle = villainStyleText(villainSummary);
-    setAiByEntryId((prev) => ({ ...prev, [entry.id]: { status: "loading" } }));
+    setAiByEntryId((prev) => ({ ...prev, [key]: { status: "loading" } }));
     try {
-      const data = await fetchTableCoachAi(view.hand_id, villainStyle);
-      setAiByEntryId((prev) => ({ ...prev, [entry.id]: { status: "done", text: data.text } }));
+      const data = await fetchTableCoachAi(view.hand_id, villainStyle, persona);
+      setAiByEntryId((prev) => ({ ...prev, [key]: { status: "done", text: data.text } }));
       if (voiceEnabled) {
         speak(data.text, { onStart: () => setAiSpeaking(true), onEnd: () => setAiSpeaking(false) });
       }
     } catch (e) {
       setAiByEntryId((prev) => ({
         ...prev,
-        [entry.id]: {
+        [key]: {
           status: "error",
           error: e.response?.data?.detail || "No se pudo obtener el análisis de la IA ahora mismo.",
         },
       }));
     }
   }, [liveAdviceEntry, view.hand_id, handHistory, voiceEnabled, setAiByEntryId]);
+
+  const askAiAdan = useCallback(() => askAi("adan_magreos"), [askAi]);
 
   const stopAiSpeaking = useCallback(() => {
     stopSpeaking();
@@ -327,7 +361,9 @@ export default function HandTable({
               <AiCoachPanel
                 canAsk={!!liveAdviceEntry}
                 aiState={aiState}
-                onAsk={askAi}
+                onAsk={() => askAi()}
+                aiStateAdan={aiStateAdan}
+                onAskAdan={askAiAdan}
                 speaking={aiSpeaking}
                 onStopSpeaking={stopAiSpeaking}
                 className="flex-1 min-h-0 flex flex-col"

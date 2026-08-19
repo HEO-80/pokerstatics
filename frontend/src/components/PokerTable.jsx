@@ -38,24 +38,26 @@ export default function PokerTable({
   const villainPos = (villainPosition || "").toUpperCase();
 
   return (
-    <div className="relative w-full aspect-[16/10] max-w-[900px] mx-auto">
+    <div className="relative w-full aspect-[16/10] max-w-[720px] mx-auto">
       {/* Oval table */}
       <div className="absolute inset-4 rounded-[50%] poker-table-surface border border-white/8 noise-overlay">
         {/* Inner ring */}
         <div className="absolute inset-6 rounded-[50%] border border-white/6" />
 
-        {/* Center info: scenario + pot / bet */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <div className="text-[10px] uppercase tracking-[0.25em] text-[#475569] mb-1">
+        {/* Center info: scenario + pot / bet — texto corto y con salto de
+            línea forzado (break-words) para que NUNCA desborde su ancho
+            máximo y se solape con las fichas de posición alrededor. */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none px-2">
+          <div className="text-[9px] uppercase tracking-[0.25em] text-[#475569] mb-0.5">
             Scenario
           </div>
-          <div className="font-display font-bold text-xl md:text-2xl uppercase tracking-tight text-white text-center px-4 max-w-[70%]">
+          <div className="font-display font-bold text-sm md:text-base uppercase tracking-tight text-white text-center break-words max-w-[62%]">
             {scenarioLabel}
           </div>
           {openSize != null && (
-            <div className="mt-3 font-mono-poker text-[#F59E0B] text-sm">
+            <div className="mt-1.5 font-mono-poker text-[#F59E0B] text-xs">
               Villain opens{" "}
-              <span className="font-bold text-lg">{openSize} BB</span>
+              <span className="font-bold text-sm">{openSize} BB</span>
             </div>
           )}
         </div>

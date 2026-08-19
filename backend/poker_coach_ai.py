@@ -32,6 +32,7 @@ import os
 
 import requests
 
+from coach_persona import load_persona_style_block
 from poker_coach import build_coach_response
 from poker_table import Hand
 
@@ -190,19 +191,31 @@ def build_ai_context(hand: Hand, hero_seat: int, villain_style: str | None = Non
     return "\n".join(parts)
 
 
-def ask_ai_coach(hand: Hand, hero_seat: int, villain_style: str | None = None) -> str:
+def ask_ai_coach(
+    hand: Hand, hero_seat: int, villain_style: str | None = None, persona: str = "default",
+) -> str:
     """Pide a Gemini el análisis estratégico de la decisión actual. Lanza
     CoachAiConfigError (falta la key) o CoachAiError (cualquier otro fallo:
     red, timeout, respuesta de error de Gemini, respuesta sin texto usable) —
-    el caller (poker_table_api.py) las traduce a 500/502 respectivamente."""
+    el caller (poker_table_api.py) las traduce a 500/502 respectivamente.
+
+    `persona`: "default" (o cualquier valor desconocido) = el coach de
+    siempre, sin cambios. "adan_magreos" (o cualquier otra persona con su
+    JSON en backend/data/) = añade su estilo al system prompt — ver
+    coach_persona.py. Se pasa EXPLÍCITO (nunca None) para que este coach NO
+    dependa del COACH_PERSONA de .env (ese toggle es solo para
+    poker_session_review.py)."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise CoachAiConfigError("GEMINI_API_KEY no está configurada en el backend (falta en backend/.env).")
 
     context = build_ai_context(hand, hero_seat, villain_style)
 
+    persona_block = load_persona_style_block(persona)
+    system_prompt = f"{SYSTEM_PROMPT}\n\n{persona_block}" if persona_block else SYSTEM_PROMPT
+
     payload = {
-        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"role": "user", "parts": [{"text": context}]}],
         "generationConfig": {
             # gemini-2.5-flash gasta presupuesto de tokens en "pensar" ANTES

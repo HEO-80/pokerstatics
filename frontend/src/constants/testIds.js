@@ -74,6 +74,7 @@ export const PLAY = {
   coachCounter: "play-coach-counter",
   sessionSummary: "play-session-summary",
   coachAiBtn: "play-coach-ai-btn",
+  coachAiAdanBtn: "play-coach-ai-adan-btn",
   coachAiSection: "play-coach-ai-section",
   activityToggleBtn: "play-activity-toggle-btn",
   coachAiToggleBtn: "play-coach-ai-toggle-btn",
@@ -156,6 +157,13 @@ export const STATS = {
   byPhase: "stats-by-phase",
   byAction: "stats-by-action",
   resetBtn: "stats-reset-btn",
+  // Decisiones en partida real (Práctica/Sit&Go/Torneo, ver
+  // lib/decisionStatsStorage.js) — distintas del quiz preflop de arriba.
+  decisionsOverallAccuracy: "stats-decisions-overall-accuracy",
+  decisionsTotal: "stats-decisions-total",
+  decisionsMarginal: "stats-decisions-marginal",
+  decisionsByStreet: "stats-decisions-by-street",
+  decisionsByAction: "stats-decisions-by-action",
 };
 
 // Sistema de puntos/nivel por calidad de decisión (lib/points.js,

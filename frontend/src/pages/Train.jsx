@@ -120,6 +120,16 @@ export default function Train() {
     loadHand(t.playersRemaining);
   };
 
+  // Resumen legible ("AJs · SB vs BTN · 40 BB · 3BET/CALL") en vez del
+  // identificador crudo del escenario (p.ej. "SB_VS_BTN_OPEN_2BB_..._3BET_CALL"),
+  // que al no tener espacios no puede partirse en varias líneas y se
+  // desbordaba por encima de las fichas de posición de la mesa.
+  const scenarioSummary = scenario
+    ? `${handCode} · ${scenario.hero_position}${
+        scenario.villain_position ? ` vs ${scenario.villain_position}` : ""
+      } · ${scenario.stack_bb} BB · ${scenario.sequence}`
+    : "";
+
   return (
     <div data-testid={TRAIN.screen} className="mx-auto max-w-[1400px] px-6 py-6">
       <div className="flex items-center justify-between mb-4">
@@ -187,9 +197,9 @@ export default function Train() {
 
       {!tournament.finished && !error && (
         <>
-          <div className="mt-6">
+          <div className="mt-4">
             {loading || !scenario ? (
-              <div className="aspect-[16/10] max-w-[900px] mx-auto rounded-[50%] border border-white/8 flex items-center justify-center">
+              <div className="aspect-[16/10] max-w-[720px] mx-auto rounded-[50%] border border-white/8 flex items-center justify-center">
                 <div className="text-[#94A3B8] font-display uppercase tracking-wider">
                   Dealing…
                 </div>
@@ -202,21 +212,13 @@ export default function Train() {
                 heroStackBb={scenario.stack_bb}
                 villainStackBb={scenario.stack_bb}
                 openSize={scenario.open_size_bb}
-                scenarioLabel={scenario.scenario}
+                scenarioLabel={scenarioSummary}
               />
             )}
           </div>
 
-          <div className="mt-8">
+          <div className="mt-4">
             <ActionButtons onAction={handleAction} disabled={loading || !!feedback} />
-            {scenario && !loading && (
-              <div className="mt-4 text-center text-sm text-[#94A3B8]">
-                <span className="font-mono-poker text-white">{handCode}</span>{" "}
-                · {scenario.hero_position}
-                {scenario.villain_position ? ` vs ${scenario.villain_position}` : ""} ·{" "}
-                {scenario.stack_bb} BB · {scenario.sequence}
-              </div>
-            )}
           </div>
         </>
       )}

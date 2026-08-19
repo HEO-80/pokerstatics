@@ -35,6 +35,8 @@ import requests
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
+from coach_persona import load_persona_style_block
+
 session_review_router = APIRouter(prefix="/api")
 
 GEMINI_MODEL = "gemini-2.5-flash"
@@ -239,8 +241,11 @@ def ask_session_review(payload: SessionReviewIn) -> str:
 
     context = build_session_context(payload)
 
+    persona_block = load_persona_style_block()
+    system_prompt = f"{SYSTEM_PROMPT}\n\n{persona_block}" if persona_block else SYSTEM_PROMPT
+
     request_payload = {
-        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+        "system_instruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"role": "user", "parts": [{"text": context}]}],
         "generationConfig": {
             # Sesión completa = más texto de entrada y de salida que una
