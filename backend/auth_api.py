@@ -39,6 +39,11 @@ JWT_EXPIRE_DAYS = int(os.environ.get("JWT_EXPIRE_DAYS", "30"))
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 COOKIE_NAME = "session_token"
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").lower() == "true"
+# "none" es obligatorio cuando frontend y backend viven en dominios distintos
+# (Vercel + Render) — el navegador no manda cookies "lax" en peticiones
+# cross-site. "none" exige COOKIE_SECURE=true (el navegador lo descarta si
+# no). En local (mismo origin via proxy, o http) se deja en "lax".
+COOKIE_SAMESITE = os.environ.get("COOKIE_SAMESITE", "lax").lower()
 
 
 class RegisterIn(BaseModel):
@@ -93,7 +98,7 @@ def _set_session_cookie(response: Response, user_id: str) -> None:
         value=_create_session_jwt(user_id),
         httponly=True,
         secure=COOKIE_SECURE,
-        samesite="lax",
+        samesite=COOKIE_SAMESITE,
         max_age=JWT_EXPIRE_DAYS * 24 * 3600,
         path="/",
     )
