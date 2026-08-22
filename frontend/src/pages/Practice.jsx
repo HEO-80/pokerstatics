@@ -90,9 +90,20 @@ export default function Practice() {
   const roles = view ? seatRoles(view.players.length, buttonSeat) : null;
   const canStartNew = !view || view.finished;
 
+  // Cadena de alturas (mismo patrón "layout sin scroll" que ya usan
+  // SitAndGo.jsx/Tournament.jsx — ver el comentario largo en HandTable.jsx):
+  // la raíz tiene que ser h-full (100% del hueco que App.js deja bajo la
+  // NavBar) + flex-col + overflow-hidden, y el hijo que crece (la mesa en
+  // juego, o el formulario mientras no hay mano) tiene que ser flex-1
+  // min-h-0. Antes la raíz era un simple `w-full` sin alto ni flex-col: sin
+  // un ancestro con alto REAL, el `flex-1 min-h-0` de HandTable/PlayTable no
+  // tenía nada que llenar y el óvalo de la mesa se quedaba con la altura
+  // mínima que su propio contenido forzara — de ahí que saliera achatado
+  // (mucho ancho, poco alto) y con los asientos/cartas solapándose, aunque
+  // en Sit&Go/Torneo la MISMA mesa se viera bien.
   return (
-    <div data-testid={PLAY.screen} className="w-full px-3 sm:px-6 py-3">
-      <div className="flex items-center justify-between mb-2">
+    <div data-testid={PLAY.screen} className="h-full flex flex-col overflow-hidden">
+      <div className="shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 pb-2">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] flex items-center justify-center shrink-0">
             <Gamepad2 className="w-3.5 h-3.5 text-white" />
@@ -111,47 +122,48 @@ export default function Practice() {
         )}
       </div>
 
-      {!view && <PlaySetupForm defaults={DEFAULTS} onStart={startHand} disabled={loading || !canStartNew} />}
-
       {error && (
         <div
           data-testid={PLAY.errorBanner}
-          className="mt-4 p-4 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/40 text-[#EF4444] text-sm"
+          className="shrink-0 mx-3 sm:mx-6 mb-2 p-4 rounded-lg bg-[#EF4444]/10 border border-[#EF4444]/40 text-[#EF4444] text-sm"
         >
           {error}
         </div>
       )}
 
-      {!view && (
-        <div className="mt-10 text-center text-[#94A3B8] font-display uppercase tracking-wider">
-          {loading ? "Repartiendo…" : "Configura la mesa y pulsa “Nueva mano” para empezar."}
+      {view ? (
+        <div className="flex-1 min-h-0 flex px-3 sm:px-6 pb-3">
+          <HandTable
+            view={view}
+            roles={roles}
+            handHistory={handHistory}
+            coachAdviceLog={coachAdviceLog}
+            aiByEntryId={aiByEntryId}
+            setAiByEntryId={setAiByEntryId}
+            onAction={applyAction}
+            loading={loading || animating}
+            dealing={dealing}
+            onSkipDeal={skipDeal}
+            pointsProgress={pointsProgress}
+            finishedActions={
+              <button
+                data-testid={PLAY.nextHandBtn}
+                onClick={() => startHand(config)}
+                disabled={loading}
+                className="mt-4 px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <RotateCw className="w-4 h-4" /> Siguiente mano
+              </button>
+            }
+          />
         </div>
-      )}
-
-      {view && (
-        <HandTable
-          view={view}
-          roles={roles}
-          handHistory={handHistory}
-          coachAdviceLog={coachAdviceLog}
-          aiByEntryId={aiByEntryId}
-          setAiByEntryId={setAiByEntryId}
-          onAction={applyAction}
-          loading={loading || animating}
-          dealing={dealing}
-          onSkipDeal={skipDeal}
-          pointsProgress={pointsProgress}
-          finishedActions={
-            <button
-              data-testid={PLAY.nextHandBtn}
-              onClick={() => startHand(config)}
-              disabled={loading}
-              className="mt-4 px-6 py-3 rounded-lg bg-white text-black font-display font-bold uppercase tracking-wider inline-flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <RotateCw className="w-4 h-4" /> Siguiente mano
-            </button>
-          }
-        />
+      ) : (
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 pb-3">
+          <PlaySetupForm defaults={DEFAULTS} onStart={startHand} disabled={loading || !canStartNew} />
+          <div className="mt-10 text-center text-[#94A3B8] font-display uppercase tracking-wider">
+            {loading ? "Repartiendo…" : "Configura la mesa y pulsa “Nueva mano” para empezar."}
+          </div>
+        </div>
       )}
     </div>
   );

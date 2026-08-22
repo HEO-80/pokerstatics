@@ -1,0 +1,135 @@
+/* ============================================================
+   PreflopLab — HOME (dark) · tokens y patrones
+   Referencia de valores para la home. Adapta los selectores
+   a tus componentes reales (o pásalos a tailwind.config).
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ---- superficies ---- */
+  --pl-bg:          #0a0c11;  /* fondo de página */
+  --pl-navbar:      #11151c;
+  --pl-card:        #0f131a;  /* card / panel */
+  --pl-tile:        #161b24;  /* tile dentro de card */
+  --pl-tile-alt:    #141922;  /* cápsulas, celdas fold */
+  --pl-bd-card:     #222a36;
+  --pl-bd-soft:     #1e2530;
+  --pl-bd-tile:     #252d3a;
+  --pl-bd-section:  #161c25;
+
+  /* ---- texto ---- */
+  --pl-text:        #e8edf4;
+  --pl-text-2:      #96a1b1;
+  --pl-text-3:      #8b95a4;
+  --pl-label:       #616c7c;
+  --pl-dim:         #2b3441;
+
+  /* ---- acentos: base / claro ---- */
+  --pl-blue:   #3b82f6;  --pl-blue-lt:   #7aa6ff;
+  --pl-green:  #10b981;  --pl-green-lt:  #34d399;
+  --pl-amber:  #f59e0b;  --pl-amber-lt:  #fbbf24;
+  --pl-purple: #a855f7;  --pl-purple-lt: #c4a3f7;
+  --pl-pink-lt:#f087b6;
+
+  /* ---- sombras (la profundidad es clave) ---- */
+  --pl-sh-card:   0 5px 20px rgba(0,0,0,.5);
+  --pl-sh-tile:   0 2px 8px rgba(0,0,0,.42);
+  --pl-sh-navbar: 0 2px 14px rgba(0,0,0,.55);
+  --pl-sh-mockup: 0 14px 44px rgba(0,0,0,.6);
+  --pl-sh-inset:  inset 0 1px 3px rgba(0,0,0,.6);
+  --pl-sh-white:  0 6px 26px rgba(255,255,255,.15), 0 2px 8px rgba(0,0,0,.55);
+
+  --pl-r-card: 14px;
+  --pl-r-tile: 9px;
+}
+
+/* ---- tipografía ---- */
+.pl-display { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; }
+body, .pl-mono { font-family: 'JetBrains Mono', monospace; }
+
+/* micro-etiqueta: se repite en toda la página */
+.pl-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--pl-label);
+}
+
+/* ---- navbar ---- */
+.pl-navbar { height: 64px; background: var(--pl-navbar); border-bottom: 1px solid var(--pl-bd-soft); box-shadow: var(--pl-sh-navbar); position: sticky; top: 0; z-index: 30; }
+.pl-tab        { font-size: 12.5px; padding: 9px 15px; border-radius: 9px; color: var(--pl-text-3); border: 1px solid transparent; }
+.pl-tab.is-active { background: #1c2230; color: var(--pl-text); border-color: var(--pl-blue); font-weight: 600; box-shadow: 0 0 0 1px rgba(59,130,246,.2), 0 3px 10px rgba(0,0,0,.45); }
+
+/* ---- cards y tiles ---- */
+.pl-card { background: var(--pl-card); border: 1px solid var(--pl-bd-card); border-radius: var(--pl-r-card); box-shadow: var(--pl-sh-card); }
+.pl-tile { background: var(--pl-tile); border: 1px solid var(--pl-bd-tile); border-radius: var(--pl-r-tile); box-shadow: var(--pl-sh-tile); }
+
+/* acento superior por tarjeta (patrón recurrente) */
+.pl-card--blue   { border-top: 2px solid var(--pl-blue); }
+.pl-card--green  { border-top: 2px solid var(--pl-green); }
+.pl-card--amber  { border-top: 2px solid var(--pl-amber); }
+.pl-card--purple { border-top: 2px solid var(--pl-purple); }
+
+/* hover de tarjeta interactiva */
+.pl-card--hover { transition: all .16s; cursor: pointer; }
+.pl-card--hover:hover { transform: translateY(-3px); }
+.pl-card--blue.pl-card--hover:hover   { border-color: var(--pl-blue);   box-shadow: 0 0 0 1px rgba(59,130,246,.2),  0 12px 30px rgba(59,130,246,.15); }
+.pl-card--green.pl-card--hover:hover  { border-color: var(--pl-green);  box-shadow: 0 0 0 1px rgba(16,185,129,.2),  0 12px 30px rgba(16,185,129,.15); }
+.pl-card--amber.pl-card--hover:hover  { border-color: var(--pl-amber);  box-shadow: 0 0 0 1px rgba(245,158,11,.2),  0 12px 30px rgba(245,158,11,.15); }
+.pl-card--purple.pl-card--hover:hover { border-color: var(--pl-purple); box-shadow: 0 0 0 1px rgba(168,85,247,.2),  0 12px 30px rgba(168,85,247,.15); }
+
+/* ---- badges / pills de acento ---- */
+.pl-badge { font-size: 8.5px; font-weight: 700; letter-spacing: .9px; padding: 3px 9px; border-radius: 5px; display: inline-flex; align-items: center; gap: 6px; }
+.pl-badge--blue   { background: rgba(59,130,246,.12); color: var(--pl-blue-lt);   border: 1px solid var(--pl-blue); }
+.pl-badge--green  { background: rgba(16,185,129,.13); color: var(--pl-green-lt);  border: 1px solid var(--pl-green); }
+.pl-badge--amber  { background: rgba(245,158,11,.15); color: var(--pl-amber-lt);  border: 1px solid var(--pl-amber); }
+.pl-badge--purple { background: rgba(168,85,247,.12); color: var(--pl-purple-lt); border: 1px solid #7c3aed; }
+
+/* caja de icono con glow */
+.pl-icon { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+.pl-icon--blue   { background: rgba(59,130,246,.12); color: var(--pl-blue-lt);   border: 1px solid var(--pl-blue);   box-shadow: 0 0 0 1px rgba(59,130,246,.13), 0 3px 10px rgba(59,130,246,.18); }
+.pl-icon--green  { background: rgba(16,185,129,.10); color: var(--pl-green-lt);  border: 1px solid var(--pl-green);  box-shadow: 0 0 0 1px rgba(16,185,129,.13), 0 3px 10px rgba(16,185,129,.18); }
+.pl-icon--amber  { background: rgba(245,158,11,.10); color: var(--pl-amber-lt);  border: 1px solid var(--pl-amber);  box-shadow: 0 0 0 1px rgba(245,158,11,.13), 0 3px 10px rgba(245,158,11,.18); }
+.pl-icon--purple { background: rgba(168,85,247,.10); color: var(--pl-purple-lt); border: 1px solid var(--pl-purple); box-shadow: 0 0 0 1px rgba(168,85,247,.13), 0 3px 10px rgba(168,85,247,.18); }
+
+/* ---- CTA ---- */
+.pl-cta {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 22px; font-weight: 700; letter-spacing: 1.2px;
+  padding: 18px 32px; border-radius: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 13px;
+  background: #fff; color: var(--pl-bg); border: 1px solid #fff; box-shadow: var(--pl-sh-white);
+}
+.pl-cta__arrow { color: var(--pl-blue); }
+.pl-cta--ghost { background: var(--pl-tile-alt); color: #c2cad6; border: 1px solid #2f3846; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
+
+/* ---- cápsula segmentada (credibilidad / stats en una pieza) ---- */
+.pl-capsule       { display: flex; align-items: stretch; background: var(--pl-tile-alt); border: 1px solid #232b38; border-radius: 11px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.5); width: fit-content; }
+.pl-capsule__cell { padding: 12px 20px; text-align: center; border-right: 1px solid #232b38; }
+.pl-capsule__cell:last-child { border-right: none; }
+.pl-capsule__val  { font-family: 'Barlow Condensed', sans-serif; font-size: 25px; font-weight: 700; line-height: 1; }
+.pl-capsule__key  { font-size: 8.5px; letter-spacing: .9px; color: var(--pl-label); margin-top: 2px; }
+
+/* ---- barras de progreso ---- */
+.pl-bar      { height: 6px; border-radius: 4px; background: #1a212c; overflow: hidden; box-shadow: var(--pl-sh-inset); position: relative; }
+.pl-bar__fill{ height: 100%; border-radius: 4px; }
+.pl-bar__fill--blue  { background: linear-gradient(90deg,#1d4ed8,#3b82f6,#60a5fa); }
+.pl-bar__fill--green { background: linear-gradient(90deg,#059669,#34d399); }
+.pl-bar__fill--amber { background: linear-gradient(90deg,#f59e0b,#fbbf24); }
+/* marca vertical (burbuja / % requerido) */
+.pl-bar__mark        { position: absolute; top: -2px; bottom: -2px; width: 2px; }
+.pl-bar__mark--green { background: var(--pl-green-lt); box-shadow: 0 0 6px var(--pl-green-lt); }
+.pl-bar__mark--amber { background: var(--pl-amber-lt); box-shadow: 0 0 5px var(--pl-amber-lt); }
+
+/* ---- rejilla 13x13 de manos ---- */
+.pl-grid      { display: grid; grid-template-columns: repeat(13, 1fr); gap: 1.5px; }
+.pl-grid__cell{ aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border-radius: 2px; font-size: 6.5px; font-weight: 600; }
+.pl-grid__cell--allin { background: rgba(168,85,247,.34); color: #e9d5ff; border: 1px solid var(--pl-purple); }
+.pl-grid__cell--raise { background: rgba(59,130,246,.30); color: #bfdbfe; border: 1px solid rgba(59,130,246,.75); }
+.pl-grid__cell--call  { background: rgba(16,185,129,.22); color: #a7f3d0; border: 1px solid rgba(16,185,129,.55); }
+.pl-grid__cell--fold  { background: var(--pl-tile-alt);   color: #4b5563; border: 1px solid var(--pl-bd-soft); }
+
+/* ---- cabecera de sección (etiqueta + línea que se desvanece) ---- */
+.pl-sechead      { display: flex; align-items: center; gap: 15px; margin-bottom: 22px; }
+.pl-sechead__rule{ flex: 1; height: 1px; background: linear-gradient(90deg,#232b38,transparent); }
+
+/* ---- punto de estado "en vivo" (la única animación) ---- */
+@keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.pl-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--pl-green-lt); box-shadow: 0 0 6px var(--pl-green-lt); animation: pulseDot 2s infinite; flex-shrink: 0; }

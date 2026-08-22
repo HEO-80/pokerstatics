@@ -382,7 +382,7 @@ function outcomeText(entry) {
 /** Una celda de número (POT ODDS/EQUITY/BREAKEVEN) del grid de 3 (Tarea
  * "layout sin scroll" §3) — "—" cuando ese dato no aplica al spot (p.ej. no
  * hay pot odds si no hay nada que pagar). */
-function NumberTile({ label, value, colorClass }) {
+export function NumberTile({ label, value, colorClass }) {
   return (
     <div className="rounded-lg border border-[#252d3a] bg-[#161b24] shadow-[0_2px_6px_rgba(0,0,0,.35)] px-2 py-1.5 flex flex-col items-center text-center gap-0.5">
       <div className="text-[9px] uppercase tracking-widest text-[#475569]">{label}</div>
@@ -394,7 +394,7 @@ function NumberTile({ label, value, colorClass }) {
 /** Barra "NECESITAS X% vs TIENES Y%": relleno verde al % de equity y marca
  * ámbar vertical en el % requerido — comunica de un vistazo si el call es
  * rentable, sin tener que leer los tiles de arriba número a número. */
-function EquityBar({ requiredPct, equityPct }) {
+export function EquityBar({ requiredPct, equityPct }) {
   const req = Math.max(0, Math.min(100, requiredPct));
   const eq = Math.max(0, Math.min(100, equityPct));
   return (
@@ -419,7 +419,7 @@ function EquityBar({ requiredPct, equityPct }) {
  * acción + badge "MARGINAL" aparte (ver verdictTitle) + una línea corta de
  * justificación — el razonamiento COMPLETO (situación/lectura/explicación)
  * vive en el acordeón "Por qué", abierto por defecto justo debajo. */
-function VerdictCard({ recommendation }) {
+export function VerdictCard({ recommendation }) {
   const styles = RECOMMENDATION_STYLES[recommendation.color] ?? { border: "border-white/12", bg: "", text: "text-white" };
   return (
     <div className={`shrink-0 rounded-lg border p-3 ${styles.border} ${styles.bg}`}>

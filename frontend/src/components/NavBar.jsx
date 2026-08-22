@@ -9,10 +9,10 @@ import AuthPanel from "@/components/AuthPanel";
 // compactas de Sit&Go/Torneo/Práctica). El borde inferior transparente en
 // los estados inactivo/hover evita que el texto salte de sitio al activarse
 // (mismo alto siempre, solo cambia el color del borde).
-const linkBase =
-  "px-4 py-2 rounded-md text-sm font-medium tracking-wide transition-colors flex items-center gap-2 border-b-2";
-const linkInactive = "text-[#94A3B8] hover:text-white hover:bg-white/5 border-transparent";
-const linkActive = "text-white bg-white/10 border-[#3B82F6]";
+// Restyle visual de la Home (home-spec.md §2 / pl-tokens.css .pl-tab) —
+// MISMO componente y mecanismo de antes (react-router NavLink + isActive),
+// solo cambian las clases: pill con borde en vez de borde inferior.
+const linkBase = "pl-tab flex items-center gap-2 transition-colors";
 
 /** Una celda MESA/JUGADORES/STACK/NIVEL/CIEGAS de la cápsula de stats (Tarea
  * "layout sin scroll" §1): etiqueta pequeña arriba, valor debajo — el color
@@ -67,19 +67,25 @@ function NavBarAction({ action }) {
  */
 export default function NavBar({ stats = null }) {
   return (
-    <header className="sticky top-0 z-30 border-b border-white/8 bg-[#050505]/85 backdrop-blur-xl">
-      <div className="w-full px-4 sm:px-6 lg:px-10 py-3 flex items-center justify-between gap-6">
+    <header className="pl-navbar">
+      <div className="h-full w-full px-4 sm:px-6 lg:px-10 flex items-center justify-between gap-6">
         <div className="flex items-center gap-6 min-w-0">
           <Link to="/" className="flex items-center gap-3 group shrink-0" data-testid={NAV.home}>
-            <div className="w-9 h-9 rounded-md bg-gradient-to-br from-[#3B82F6] to-[#8B5CF6] flex items-center justify-center">
-              <Spade className="w-5 h-5 text-white" />
+            <div
+              className="w-[35px] h-[35px] rounded-[10px] flex items-center justify-center shrink-0"
+              style={{
+                background: "linear-gradient(140deg,#3b82f6,#6366f1)",
+                boxShadow: "0 0 0 1px rgba(59,130,246,.25), 0 3px 10px rgba(59,130,246,.3)",
+              }}
+            >
+              <Spade className="w-4 h-4 text-white" />
             </div>
             <div className="leading-none">
-              <div className="font-display text-xl font-bold uppercase tracking-tight text-white">
-                Preflop<span className="text-[#3B82F6]">Lab</span>
+              <div className="pl-display text-[20px] uppercase text-white">
+                Preflop<span style={{ color: "var(--pl-blue)" }}>Lab</span>
               </div>
-              <div className="text-[10px] uppercase tracking-widest text-[#475569]">
-                MTT Trainer
+              <div className="pl-mono" style={{ fontSize: "7.5px", letterSpacing: "1.6px", color: "#5b6674" }}>
+                MTT TRAINER
               </div>
             </div>
           </Link>
@@ -91,56 +97,56 @@ export default function NavBar({ stats = null }) {
               to="/"
               end
               data-testid={NAV.home + "-link"}
-              className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
+              className={({ isActive }) => `${linkBase} ${isActive ? "is-active" : ""}`}
             >
               <Home className="w-4 h-4" /> Home
             </NavLink>
             <NavLink
               to="/train"
               data-testid={NAV.train}
-              className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
+              className={({ isActive }) => `${linkBase} ${isActive ? "is-active" : ""}`}
             >
               <Spade className="w-4 h-4" /> Train
             </NavLink>
             <NavLink
               to="/practice"
               data-testid={NAV.practice}
-              className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
+              className={({ isActive }) => `${linkBase} ${isActive ? "is-active" : ""}`}
             >
               <Gamepad2 className="w-4 h-4" /> Práctica
             </NavLink>
             <NavLink
               to="/tournament"
               data-testid={NAV.tournament}
-              className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
+              className={({ isActive }) => `${linkBase} ${isActive ? "is-active" : ""}`}
             >
               <Swords className="w-4 h-4" /> Torneo
             </NavLink>
             <NavLink
               to="/sitandgo"
               data-testid={NAV.sitandgo}
-              className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
+              className={({ isActive }) => `${linkBase} ${isActive ? "is-active" : ""}`}
             >
               <Crown className="w-4 h-4" /> Sit&amp;Go
             </NavLink>
             <NavLink
               to="/stats"
               data-testid={NAV.stats}
-              className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
+              className={({ isActive }) => `${linkBase} ${isActive ? "is-active" : ""}`}
             >
               <LayoutDashboard className="w-4 h-4" /> Stats
             </NavLink>
             <NavLink
               to="/review"
               data-testid={NAV.review}
-              className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
+              className={({ isActive }) => `${linkBase} ${isActive ? "is-active" : ""}`}
             >
               <RotateCcw className="w-4 h-4" /> Review
             </NavLink>
             <NavLink
               to="/admin"
               data-testid={NAV.admin}
-              className={({ isActive }) => `${linkBase} ${isActive ? linkActive : linkInactive}`}
+              className={({ isActive }) => `${linkBase} ${isActive ? "is-active" : ""}`}
             >
               <Upload className="w-4 h-4" /> Admin
             </NavLink>

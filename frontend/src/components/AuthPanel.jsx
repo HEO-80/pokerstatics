@@ -54,7 +54,10 @@ export default function AuthPanel() {
   if (user) {
     return (
       <div className="flex items-center gap-2 shrink-0">
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/5 border border-white/10 text-xs text-[#B8C1CE]">
+        <div
+          className="pl-mono flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs"
+          style={{ background: "var(--pl-tile-alt)", border: "1px solid #2f3846", color: "#c2cad6" }}
+        >
           {user.picture
             ? <img src={user.picture} alt="" className="w-4 h-4 rounded-full" referrerPolicy="no-referrer" />
             : <UserIcon className="w-3.5 h-3.5" />}
@@ -108,7 +111,12 @@ export default function AuthPanel() {
   return (
     <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : resetAndClose())}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="shrink-0">
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0 pl-mono"
+          style={{ background: "var(--pl-tile-alt)", border: "1px solid #2f3846", color: "#c2cad6" }}
+        >
           <UserIcon className="w-3.5 h-3.5" /> Entrar
         </Button>
       </DialogTrigger>
